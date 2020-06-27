@@ -11,6 +11,7 @@ from mpi4py.futures import MPIPoolExecutor as Executor
 import argparse
 import sys
 from datetime import datetime
+import tarfile
 
 
 OUTPUT_FOLDER = "./output"
@@ -55,7 +56,7 @@ def merge_netmhc_files(pfile, netmhc_out_list):
 
 
 def keep_a_copy(pfile):
-    base_dir, file_name = pfile.rsplit('/', 1)
+    base_dir, file_name = os.path.basename(pfile)
     os.makedirs(os.path.join(base_dir, 'backup'), exist_ok=True)
     c = 0
     while True:
@@ -86,13 +87,22 @@ def main():
 
     netmhc_folder = 'NetMHCpan-4.0a'
     out_dir = os.path.join(OUTPUT_FOLDER, 'allPeptides_%s' % genome)
-    nmpan_out = os.path.join(out_dir, netmhc_folder, 'predictions')
+    nmpan_out = os.path.join(out_dir, netmhc_folder)
+    nmpan_pred = os.path.join(nmpan_out, 'predictions')
+
+    if not os.path.exists(nmpan_out):
+        if os.path.exists(nmpan_out + '.tar.gz'):
+            sys.stdout.write('Predictions folder already compressed. Uncompress if you want to rerun analysis.\n')
+            sys.exit()
+        else:
+            sys.stderr.write('ERROR: Predictions folder not found.\n')
+            sys.exit(1)
 
     job_dct = defaultdict(list)
-    for fn_allele in os.listdir(nmpan_out):
+    for fn_allele in os.listdir(nmpan_pred):
         pinit, plen = fn_allele.split('.')[:2]
         pfile = 'peptides_%s%s.pkl' % (pinit, plen)
-        job_dct[os.path.join(out_dir, pfile)].append(os.path.join(nmpan_out, fn_allele))
+        job_dct[os.path.join(out_dir, pfile)].append(os.path.join(nmpan_pred, fn_allele))
 
     with Executor(max_workers=workers) as ex:
         allele_sets = ex.map(merge_netmhc_files, *zip(*job_dct.items()))
@@ -116,6 +126,10 @@ def main():
         info['date'] = datetime.now()
         keep_a_copy(pfile)
         pkl.dump(info, open(pfile, 'wb'))
+
+    with tarfile.open(nmpan_out + '.tar.gz', 'w:gz') as tar:
+        tar.add(nmpan_out, arcname=os.path.basename(nmpan_out))
+    shutil.rmtree(nmpan_out)
 
 
 if __name__ == '__main__':
