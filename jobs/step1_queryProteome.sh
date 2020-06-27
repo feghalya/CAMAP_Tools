@@ -20,6 +20,7 @@ sacct --format=JobID%15,State,ExitCode,CPUTime,MaxRSS,Start,End --units M -j \$S
 	   --mem-per-cpu 16gb --output log/$fullname.$date.log --error log/$fullname.$date.err --job-name $fullname
 }
 
+module purge
 mkdir -p log
 
 runPBS GRCh38.98

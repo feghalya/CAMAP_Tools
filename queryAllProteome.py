@@ -135,14 +135,14 @@ def main():
         future.add_done_callback(functools.partial(augment_done, len(chunk)))
         futures.append(future)
 
-    peptides = defaultdict(lambda: defaultdict(dict))
+    peptides = defaultdict(lambda: defaultdict(lambda: {'genes': {}}))
     completed = 0
     checkpoint = 0
     for future in as_completed(futures):
         completed += 1
         for pep, genes_dict in future.result().items():
             k = pep[0] + str(len(pep))
-            peptides[k][pep].update(genes_dict)
+            peptides[k][pep]['genes'].update(genes_dict)
         pcomp = completed/float(n_jobs_real)*100
         pdone = CompletedTasks/float(len(all_genes))*100
         sys.stderr.write('Added to dictionary: %.1f %%  Completed: %.1f %%\n' % (pcomp, pdone))
@@ -164,6 +164,7 @@ def main():
     peplist = []
 
     for key, di in peptides.items():
+        di = dict(di)
         peplist.extend(list(di.keys()))
         outfile = 'output/allPeptides_%s/peptides_%s.pkl' % (genome, key)
         pickle.dump(di, open(outfile, 'wb'))
