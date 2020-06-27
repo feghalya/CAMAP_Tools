@@ -7,7 +7,7 @@ import os
 import math
 import sys
 import pkg_resources
-import datetime
+from datetime import datetime
 import functools
 import argparse
 
@@ -157,7 +157,7 @@ def main():
     info = {'contextsize': context,
             'genomeVersion': genome,
             'pyGenoVersion': pkg_resources.get_distribution("pyGeno").version,
-            'date': datetime.datetime.now()}
+            'date': datetime.now()}
     outfile = 'output/allPeptides_%s/info.pkl' % genome
     pickle.dump(info, open(outfile, 'wb'))
 

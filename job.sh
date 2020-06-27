@@ -1,1 +1,1 @@
-jobs/step1_queryProteome.sh
+jobs/step2_calcNetMHC.sh
