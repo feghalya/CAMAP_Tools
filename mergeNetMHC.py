@@ -12,6 +12,7 @@ import argparse
 import sys
 from datetime import datetime
 import tarfile
+import subprocess
 
 
 OUTPUT_FOLDER = "./output"
@@ -56,19 +57,20 @@ def merge_netmhc_files(pfile, netmhc_out_list):
 
 
 def keep_a_copy(pfile):
-    base_dir, file_name = os.path.basename(pfile)
+    base_dir, file_name = pfile.rsplit('/', 1)
     os.makedirs(os.path.join(base_dir, 'backup'), exist_ok=True)
     c = 0
     while True:
-        f1 =  pfile
+        f1 = pfile
         f2 = os.path.join(base_dir, 'backup', file_name.replace('.pkl', '.%d.pkl' % c))
         try:
             if os.path.isfile(f2):
-                raise Exception
-            shutil.move(f1, f2)
+                raise OSError
             print('%s: Moving %s to %s and replacing with updated annotations.' % (pfile, f1, f2))
+            shutil.move(f1, f2)
+            subprocess.call(['gzip', f2], shell=False)
             break
-        except Exception:
+        except OSError:
             c += 1
 
 
@@ -104,8 +106,11 @@ def main():
         pfile = 'peptides_%s%s.pkl' % (pinit, plen)
         job_dct[os.path.join(out_dir, pfile)].append(os.path.join(nmpan_pred, fn_allele))
 
-    with Executor(max_workers=workers) as ex:
-        allele_sets = ex.map(merge_netmhc_files, *zip(*job_dct.items()))
+    if workers:
+        with Executor(max_workers=workers) as ex:
+            allele_sets = ex.map(merge_netmhc_files, *zip(*job_dct.items()))
+    else:
+        allele_sets = map(merge_netmhc_files, *zip(*job_dct.items()))
 
     alleles = set()
     for al in allele_sets:
