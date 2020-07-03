@@ -1,2 +1,5 @@
+__pycache__/
 output/
 log/
+data/expression/analysis/
+data/peptides/ms/
