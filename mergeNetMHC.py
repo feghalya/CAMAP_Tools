@@ -27,7 +27,7 @@ def merge_netmhc_files(pfile, netmhc_out_list):
     dfs = []
     for fn in netmhc_out_list:
         with open(fn, 'r') as f:
-            allele = f.readline().strip()
+            allele = f.readline().strip().replace(':', '')
         temp_df = pd.read_csv(fn, sep='\t', skiprows=[0], header=0, usecols=columns_to_keep, index_col=0)
         dfs.append(temp_df)
         dfs[-1].columns = pd.MultiIndex.from_product([[allele], dfs[-1].columns])
