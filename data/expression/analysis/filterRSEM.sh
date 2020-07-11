@@ -53,7 +53,7 @@ filter() {
     echo
 
     # Filter
-    awk -F '\t' '
+    awk -F '\t' 'NR == 1 {next}
             {sum=0;
              for (i=2; i <= NF; i++) sum += $i;
              sum /= (NF-1)}
@@ -73,7 +73,7 @@ filter() {
     echo mean expressed 99%: $nlines99
     echo
 
-    awk -F '\t' '
+    awk -F '\t' 'NR == 1 {next}
             {n=NF-1;
              split("", a, ":");
              for (i=1; i <= n; i++) a[$i]=$(i+1);
