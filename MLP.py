@@ -5,6 +5,7 @@ import os
 import pickle as pkl
 from concurrent.futures import ProcessPoolExecutor as Executor, as_completed
 import random
+import pandas as pd
 
 #from pyGeno.tools.UsefulFunctions import codonTable, AATable, synonymousCodonsFrequencies
 from genomeData import codonTable, AATable, synonymousCodonsFrequencies
@@ -70,17 +71,25 @@ class Dataset(object):
         self.out_dir = os.path.join(self.output_folder, 'allPeptides_%s' % self.genome)
         self.species = 'Human' if 'GRCh' in genome else 'Mouse'
 
+        dr = 'data/alleles'
+        fn = self.species + '.tsv'
+        alleles_df = pd.read_csv(os.path.join(dr, fn), sep='\t', index_col=0)
+        colname = [x for x in alleles_df.columns if self.species+self.cellline in x]
+        assert len(colname) == 1
+        colname = colname[0]
+        self.alleles = set(alleles_df[alleles_df[colname] == 1].index)
+
         dr = 'data/peptides'
         fn = 'detected.peptides.' + self.species + cellline
-        self.massspec_file = [os.path.join(dr, f) for f in os.listdir(dr) if fn in f]
-        assert len(self.massspec_file) == 1
-        self.massspec_file = self.massspec_file[0]
+        massspec_file = [os.path.join(dr, f) for f in os.listdir(dr) if fn in f]
+        assert len(massspec_file) == 1
+        self.massspec_file = massspec_file[0]
 
         dr = 'data/expression'
         fn = 'isoforms.median.tpm.99p.' + self.species + cellline
-        self.expression_file = [os.path.join(dr, f) for f in os.listdir(dr) if fn in f]
-        assert len(self.expression_file) == 1
-        self.expression_file = self.expression_file[0]
+        expression_file = [os.path.join(dr, f) for f in os.listdir(dr) if fn in f]
+        assert len(expression_file) == 1
+        self.expression_file = expression_file[0]
  
         with open(self.massspec_file, 'r') as f:
             self.detected_peptides = set([l.strip() for l in f.readlines()])
@@ -96,8 +105,8 @@ class Dataset(object):
         self.pepfiles = pepfiles
 
 
-    def load_peptides(self, context_len=162, max_rank=1, max_contexts=3, workers=0):
-        self.max_rank = max_rank
+    def load_peptides(self, context_len=162, max_bs=1250, max_contexts=3, workers=0):
+        self.max_bs = max_bs
         self.max_contexts = max_contexts
         self.context_len = context_len
 
@@ -149,10 +158,10 @@ class Dataset(object):
     def _get_peptides(self, pfile):
         print(pfile)
 
-        var = 'Rank'
-        if self.max_rank > 100:
-            print('Turning rank into nM')
-            var = 'nM'
+        var = 'nM'
+        if self.max_bs < 10:
+            print('Turning nM into Rank')
+            var = 'Rank'
 
         pdct = pkl.load(open(pfile, 'rb'))
         peptides = [{}, {}]
@@ -166,6 +175,7 @@ class Dataset(object):
             ix = 1 if pep in self.detected_peptides else 0
             try:
                 mhc_scores = pinfo['netmhcpan']
+                mhc_scores = {k: mhc_scores[k] for k in self.alleles}
             except KeyError as e:
                 if 'U' not in pep:
                     print(pep)
@@ -174,7 +184,7 @@ class Dataset(object):
                     continue
             gene_entries = pinfo['genes']
             rank = min([sc[var] for sc in mhc_scores.values()])
-            if rank < self.max_rank:
+            if rank < self.max_bs:
                 contexts = []
                 transcripts = []
                 tr_set = set()
@@ -215,7 +225,6 @@ class Dataset(object):
         if copy_tpm_distribution:
             import numpy as np
             import math
-            import pandas as pd
 
             ns_exp = pd.Series(np.log2(np.array([self.pepexpr[pep] for pep in self.peplist_nonsource])))
             s_exp = np.log2(np.array([self.pepexpr[pep] for pep in self.peplist_source]))

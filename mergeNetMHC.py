@@ -58,11 +58,11 @@ def merge_netmhc_files(pfile, netmhc_out_list):
 
 def keep_a_copy(pfile):
     base_dir, file_name = pfile.rsplit('/', 1)
-    os.makedirs(os.path.join(base_dir, 'backup'), exist_ok=True)
+    os.makedirs(os.path.join(base_dir, 'Backup'), exist_ok=True)
     c = 0
     while True:
         f1 = pfile
-        f2 = os.path.join(base_dir, 'backup', file_name.replace('.pkl', '.%d.pkl' % c))
+        f2 = os.path.join(base_dir, 'Backup', file_name.replace('.pkl', '.%d.pkl' % c))
         try:
             if os.path.isfile(f2):
                 raise OSError
