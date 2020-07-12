@@ -12,6 +12,7 @@ import subprocess
 import math
 import pkg_resources
 from datetime import datetime
+import tarfile
 
 import camap.trainer as CAMAP
 
@@ -110,8 +111,11 @@ class Peptides(object):
             executor = Executor
         self.overwrite = overwrite
 
-        with executor(max_workers=workers) as ex:
-            counts = sum(list(ex.map(self._annotate, self.pepfiles)))
+        if workers:
+            with executor(max_workers=workers) as ex:
+                counts = sum(list(ex.map(self._annotate, self.pepfiles)))
+        else:
+            counts = sum(list(map(self._annotate, self.pepfiles)))
 
         pfile = os.path.join(self.out_dir, 'info.pkl')
         info = pkl.load(open(pfile, 'rb'))
@@ -170,6 +174,100 @@ class Peptides(object):
         return counter
 
 
+    def merge_netmhc(self, workers, executor=None, overwrite=False):
+        if executor is None:
+            executor = Executor
+        self.overwrite = overwrite
+
+        self.columns_to_keep = ['Peptide', '1-log50k', 'nM', 'Rank']
+
+        netmhc_folder = 'NetMHCpan-4.0a'
+        nmpan_out = os.path.join(self.out_dir, netmhc_folder)
+        nmpan_pred = os.path.join(nmpan_out, 'predictions')
+
+        if not os.path.exists(nmpan_out):
+            if os.path.exists(nmpan_out + '.tar.gz'):
+                sys.stdout.write('Predictions folder already compressed. Uncompress if you want to rerun analysis.\n')
+                return
+            else:
+                sys.stderr.write('ERROR: Predictions folder not found.\n')
+                sys.exit(1)
+
+        job_dct = defaultdict(list)
+        for fn_allele in os.listdir(nmpan_pred):
+            pinit, plen = fn_allele.split('.')[:2]
+            pfile = 'peptides_%s%s.pkl' % (pinit, plen)
+            job_dct[os.path.join(out_dir, pfile)].append(os.path.join(nmpan_pred, fn_allele))
+
+        if workers:
+            with executor(max_workers=workers) as ex:
+                allele_sets = ex.map(self._merge_netmhc, *zip(*job_dct.items()))
+        else:
+            allele_sets = map(self._merge_netmhc, *zip(*job_dct.items()))
+
+        alleles = set()
+        for al in allele_sets:
+            alleles.update(al)
+
+        pfile = os.path.join(out_dir, 'info.pkl')
+        info = pkl.load(open(pfile, 'rb'))
+
+        edited = False
+        if 'allelesNetMHC' not in info:
+            info['NetMHCVersion'] = set([netmhc_folder])
+            edited = True
+        if 'allelesNetMHC' not in info:
+            info['allelesNetMHC'] = alleles
+            edited = True
+
+        if edited:
+            info['date'] = datetime.now()
+            self._keep_a_copy(pfile)
+            pkl.dump(info, open(pfile, 'wb'))
+
+        with tarfile.open(nmpan_out + '.tar.gz', 'w:gz') as tar:
+            tar.add(nmpan_out, arcname=os.path.basename(nmpan_out))
+        shutil.rmtree(nmpan_out)
+
+
+    def _merge_netmhc(self, pfile, netmhc_out_list):
+        print(pfile)
+        pepdict = pkl.load(open(pfile, 'rb'))
+
+        dfs = []
+        for fn in netmhc_out_list:
+            with open(fn, 'r') as f:
+                allele = f.readline().strip().replace(':', '')
+            temp_df = pd.read_csv(fn, sep='\t', skiprows=[0], header=0, usecols=self.columns_to_keep, index_col=0)
+            dfs.append(temp_df)
+            dfs[-1].columns = pd.MultiIndex.from_product([[allele], dfs[-1].columns])
+
+        df = pd.concat(dfs, axis=1, sort=False, copy=False)
+
+        edited = False
+        alleles = set()
+        for pep, scores in df.to_dict(orient='index').items():
+            if self.overwrite:
+                del pepdict[pep]['netmhcpan']
+            if 'netmhcpan' not in pepdict[pep]:
+                d = defaultdict(dict)
+                for allele, s in scores.items():
+                    al, t = allele
+                    alleles.add(al)
+                    d[al][t] = s
+                d = dict(d)
+                pepdict[pep]['netmhcpan'] = d
+                edited = True
+
+        if edited:
+            self._keep_a_copy(pfile)
+            pkl.dump(pepdict, open(os.path.join(pfile), 'wb'))
+        else:
+            print('$s: Nothing changed, keeping everything as is.' % pfile)
+
+        return alleles
+
+
     @staticmethod
     def _keep_a_copy(pfile):
         base_dir, file_name = pfile.rsplit('/', 1)
@@ -179,7 +277,7 @@ class Peptides(object):
             f1 = pfile
             f2 = os.path.join(base_dir, 'Backup', file_name.replace('.pkl', '.%d.pkl' % c))
             try:
-                if os.path.isfile(f2):
+                if os.path.isfile(f2 + '.gz'):
                     raise OSError
                 print('%s: Moving %s to %s and replacing with updated annotations.' % (pfile, f1, f2))
                 shutil.move(f1, f2)
@@ -240,10 +338,13 @@ class Dataset(Peptides):
         #self.tpm_dct = {x:y for x, y in self.tpm_dct.items() if float(y)>0.1}
 
 
-    def load_peptides(self, context_len=162, max_bs=1250, max_contexts=3, workers=0):
+    def load_peptides(self, max_bs=1250, max_contexts=3, workers=0,
+            step='createDS', ann_method='Adam', ann_params=(162, 500, '9', 't5')):
         self.max_bs = max_bs
         self.max_contexts = max_contexts
-        self.context_len = context_len
+        self.step = step
+        self.ann_method = ann_method  # only applicable if step=='evaluateDS'
+        self.ann_params = ann_params  # only applicable if step=='evaluateDS'
 
         if workers:
             with Executor(max_workers=workers) as ex:
@@ -253,7 +354,7 @@ class Dataset(Peptides):
 
         pepdict_nonsource = {}
         pepdict_source = {}
-        pep_in_tr = {}
+        peptr = {}
         pepexpr = {}
         pepbs = {}
         source_tr_dct = {k: False for k in self.tpm_dct.keys()}
@@ -261,7 +362,7 @@ class Dataset(Peptides):
         for nonsource_dct, source_dct, tdict, pit, pexp, pbs in out_dcts:
             pepdict_nonsource.update(nonsource_dct)
             pepdict_source.update(source_dct)
-            pep_in_tr.update(pit)
+            peptr.update(pit)
             pepexpr.update(pexp)
             pepbs.update(pbs)
             for key, val in tdict.items():
@@ -273,19 +374,17 @@ class Dataset(Peptides):
         rem = set()
         for pep in list(pepdict_nonsource.keys()):
             p = pep[0]
-            if pep_in_tr[p].intersection(self.source_transcripts):
+            if peptr[p].intersection(self.source_transcripts):
                 del pepdict_nonsource[pep]
                 del pepexpr[pep]
                 rem.add(p)
         for p in rem:
-            del pep_in_tr[p]
+            del peptr[p]
 
-        self.pep_in_tr = pep_in_tr
         self.pepexpr = pepexpr
         self.pepbs = pepbs
 
         self.peptides = [pepdict_nonsource, pepdict_source]
-
         self.peplist_nonsource = list(pepdict_nonsource.keys())
         self.peplist_source = list(pepdict_source.keys())
 
@@ -301,8 +400,8 @@ class Dataset(Peptides):
         pdct = pkl.load(open(pfile, 'rb'))
         peptides = [{}, {}]
         # True == source peptide in transcript, else False
-        transdct = {k: False for k in self.tpm_dct.keys()}
-        pep_in_tr = {}
+        tr_is_source = {k: False for k in self.tpm_dct.keys()}
+        peptr = {}
         pepexpr = {}
         pepbs = {}
 
@@ -310,7 +409,6 @@ class Dataset(Peptides):
             ix = 1 if pep in self.detected_peptides else 0
             try:
                 mhc_scores = pinfo['netmhcpan']
-                mhc_scores = {k: mhc_scores[k] for k in self.alleles}
             except KeyError as e:
                 if 'U' not in pep:
                     print(pep)
@@ -318,7 +416,9 @@ class Dataset(Peptides):
                 else:
                     continue
             gene_entries = pinfo['genes']
+            mhc_scores = {al:mhc_scores[al] for al in mhc_scores if al in self.alleles])
             bs = min([sc[var] for sc in mhc_scores.values()])
+            logbs = max[sc['1-log50k'] for sc in mhc_scores.values()])
             if bs < self.max_bs:
                 contexts = []
                 transcripts = []
@@ -326,22 +426,36 @@ class Dataset(Peptides):
                 for genes in gene_entries.values():
                     for g_cont in genes:
                         tr = [t for t in g_cont['transcriptID'] if t in self.tpm_dct]
-                        if len(tr):
+                        if tr:
                             contexts.append(g_cont)
                             transcripts.append(tr)
+                            tr_set.update(tr)
                             for t in tr:
-                                transdct[t] = transdct[t] or (pep in self.detected_peptides)
-                                tr_set.add(t)
+                                # WARNING: Not taking into account min_BS
+                                #          This would create a set of transcripts that are not source
+                                #          but also not non-source, which are discarded anyway and never
+                                #          appear in the negative dataset
+                                tr_is_source[t] = tr_is_source[t] or (pep in self.detected_peptides)
                 if len(contexts) <= self.max_contexts:
-                    pep_in_tr[pep] = tr_set
+                    peptr[pep] = tr_set
+                    pepbs[pep] = logbs if var == 'nM' else bs
                     for i, (g_cont, tr) in enumerate(zip(contexts, transcripts)):
-                        max_exp = max([self.tpm_dct[t] for t in tr])
+                        exp = [self.tpm_dct[t] for t in tr]
                         if '!GA' not in g_cont['sequenceContext']:
-                            peptides[ix][(pep, i)] = g_cont
-                            pepexpr[(pep, i)] = max_exp
-                            pepbs[(pep, i)] = bs
+                            pepexpr[(pep, i)] = exp
+                            if self.step == 'createDS':
+                                peptides[ix][(pep, i)] = g_cont
+                            elif self.step == 'evaluateDS':
+                                dct = g_cont['CAMAPScore']
+                                dct = {k:dct[k] for k in dct if k.split('_')[0] == self.ann_method}
+                                for key in dct:
+                                    dct[key] = dct[key][self.ann_params]
+                                peptides[ix][(pep, i)] = dct
+                            else:
+                                sys.stderr.write('ERROR: Unknown option given to step argument')
+                                sys.exit(1)
 
-        return peptides[0], peptides[1], transdct, pep_in_tr, pepexpr, pepbs
+        return peptides[0], peptides[1], tr_is_source, peptr, pepexpr, pepbs
 
 
     def split_dataset(self, ratio=5, same_tpm=False, seed=0):
@@ -349,12 +463,11 @@ class Dataset(Peptides):
         print(len(self.peplist_source), len(self.peplist_nonsource))
 
         copy_tpm_distribution = same_tpm
-        #filtering = False
         #debug = False
 
         if copy_tpm_distribution:
-            ns_exp = pd.Series(np.log2(np.array([self.pepexpr[pep] for pep in self.peplist_nonsource])))
-            s_exp = np.log2(np.array([self.pepexpr[pep] for pep in self.peplist_source]))
+            ns_exp = pd.Series(np.log2(np.array([max(self.pepexpr[pep]) for pep in self.peplist_nonsource])))
+            s_exp = np.log2(np.array([max(self.pepexpr[pep]) for pep in self.peplist_source]))
 
             start, end = -10, 10
             l = [-np.inf] + list(range(start, end)) + [np.inf]
@@ -386,19 +499,6 @@ class Dataset(Peptides):
             print(len(self.peplist_source), len(filtered_nonsource), len(unfiltered_nonsource))
 
         else:
-            #if filtering:
-            #    filtered_nonsource = list()
-            #    unfiltered_nonsource = list()
-            #    for pep in self.peplist_nonsource:
-            #        max_exp = self.pepexpr[pep]
-            #        rank = self.pepbs[pep]
-            #        #if max_exp >= 1:
-            #        if rank < 500:
-            #            filtered_nonsource.append(pep)
-            #        else:
-            #            unfiltered_nonsource.append(pep)
-            #    self.peplist_nonsource = filtered_nonsource
-
             ratio = len(self.peplist_source)*ratio/len(self.peplist_nonsource)
             ratio = min(ratio, 1)
 
@@ -406,10 +506,6 @@ class Dataset(Peptides):
                 keep = self.peplist_nonsource
             else:
                 discard, keep = train_test_split(self.peplist_nonsource, test_size=ratio, random_state=seed)
-
-            #if filtering:
-            #    unfiltered_nonsource.extend(discard)
-            #    print(len(self.peplist_source), len(self.peplist_nonsource), len(unfiltered_nonsource))
 
         dct_pep = {
             'train': [[], []],
@@ -421,7 +517,7 @@ class Dataset(Peptides):
         dct_pep['validation'][0], dct_pep['test'][0] = train_test_split(pre_test, test_size=0.5, random_state=seed)
 
         #if debug:
-        #    if copy_tpm_distribution: # or filtering:
+        #    if copy_tpm_distribution:
         #        nr = len(dct_pep['test'][0])/len(unfiltered_nonsource)
         #        _, dct_pep['test'][0] = train_test_split(unfiltered_nonsource, test_size=nr, random_state=seed)
 
@@ -431,7 +527,7 @@ class Dataset(Peptides):
         self.dct_pep = dct_pep
 
 
-    def encode_peptides(self, seed=0, workers=0):
+    def encode_peptides(self, context_len=162, seed=0, workers=0):
         """ The current implementation splits the original dataset, and then shuffles sequences.
         A direct consequence of this is when the same sequence is selected in more than 1 split,
         the resulting shuffling may or may not (most probable) be the same.
@@ -476,7 +572,7 @@ class Dataset(Peptides):
                     for ix in range(0, len(dct_pep[ds][i]), chunk_size):
                         pep_list = dct_pep[ds][i][ix:ix+chunk_size]
                         meta_lst = [self.peptides[i][pep] for pep in pep_list]
-                        future = ex.submit(self._encode, self.encoding, meta_lst, self.context_len, iterseed+ix)
+                        future = ex.submit(self._encode, self.encoding, meta_lst, context_len, iterseed+ix)
                         futures[future] = (ds, i)
             print('Futures: %d' % len(futures))
             for future in as_completed(futures):
@@ -490,7 +586,7 @@ class Dataset(Peptides):
                     iterseed += 1
                     pep_list = dct_pep[ds][i]
                     meta_lst = [self.peptides[i][pep] for pep in pep_list]
-                    res = self._encode(self.encoding, meta_lst, self.context_len, iterseed)
+                    res = self._encode(self.encoding, meta_lst, context_len, iterseed)
                     fill_dcts(ds, i, res)
 
         self.meta_dct = meta_dct
