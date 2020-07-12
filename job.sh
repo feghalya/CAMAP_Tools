@@ -1,1 +1,1 @@
-jobs/step5_createDS.sh
+jobs/step6_trainANN.sh
