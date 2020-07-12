@@ -14,8 +14,9 @@ def encode_dataset(genome, ds, peplen, context_len, max_bs, max_contexts, ratio,
     dat.load_peptides(context_len=context_len, max_bs=max_bs, max_contexts=max_contexts, workers=workers)
 
     for seed in seeds:
-        dat.encode_peptides(ratio=ratio, same_tpm=same_tpm, seed=seed, workers=workers)
- 
+        dat.split_dataset(ratio=ratio, same_tpm=same_tpm, seed=seed):
+        dat.encode_peptides(seed=seed, workers=workers)
+
         if not os.path.exists('output/trainDS'):
             os.makedirs('output/trainDS')
 
@@ -60,7 +61,7 @@ def main():
     workers = args['workers']
 
     encode_dataset(genome, ds, peplen, context_len, max_bs, max_contexts, ratio, same_tpm, seeds, workers)
- 
+
 
 if __name__ == '__main__':
     main()

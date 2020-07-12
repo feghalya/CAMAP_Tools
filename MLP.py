@@ -5,10 +5,19 @@ import os
 import pickle as pkl
 from concurrent.futures import ProcessPoolExecutor as Executor, as_completed
 import random
+import numpy as np
 import pandas as pd
+import shutil
+import subprocess
+import math
+import pkg_resources
+from datetime import datetime
+
+import camap.trainer as CAMAP
 
 #from pyGeno.tools.UsefulFunctions import codonTable, AATable, synonymousCodonsFrequencies
 from genomeData import codonTable, AATable, synonymousCodonsFrequencies
+from utils import available_models
 
 
 OUTPUT_FOLDER = "./output"
@@ -46,10 +55,144 @@ class CodonEmbeddings(object):
         return X
 
 
-class Dataset(object):
-    def __init__(self, genome, cellline):
+class Model(CAMAP.Classifier):
+    def __init__(self, model, context, device='cpu'):
+        self.context = context
+        self.padding = int(self.context // 3)
+        input_len = self.padding * 2
+        super(Model, self).__init__(input_len)
+        self.encoding = CodonEmbeddings()
+        CAMAP.load_model(model, self, device)
+
+    def get_seq_score_from_nt(self, sequences):
+        if type(sequences) == str:
+            sequences = [sequences]
+        seq_embeddings = np.empty((self.padding * 2, len(sequences)), dtype=int)
+        for i, sequence in enumerate(sequences):
+            if len(sequence) > self.context * 2:
+                sequence = sequence[:self.context]+sequence[-self.context:]
+            sequence = self.encoding.encode(sequence)
+            seq_embeddings[:,i] = sequence
+        return self.get_score(seq_embeddings)
+
+
+class Peptides(object):
+    def __init__(self, genome):
         self.output_folder = OUTPUT_FOLDER
         self.genome = genome
+        assert 'GRCh' in genome or 'GRCm' in genome
+        self.out_dir = os.path.join(self.output_folder, 'allPeptides_%s' % self.genome)
+        self.species = 'Human' if 'GRCh' in genome else 'Mouse'
+
+        # detect pickle peptide files
+        pepfiles = [os.path.join(self.out_dir, f) for f in os.listdir(self.out_dir) if f[:8] == 'peptides']
+        self.pepfiles = pepfiles
+
+
+    def load_models(self):
+        def load():
+            return available_models(
+                target = 'validation-bestMin-score.pytorch'
+                )
+
+        self.model_names = load()
+
+        models = load()
+        for method, method_dct in models.items():
+            for params, model_list in method_dct.items():
+                context_len = params[0]
+                method_dct[params] = [Model(m, context_len, 'cpu') for m in model_list]
+        self.models = models
+
+
+    def annotate(self, workers, executor=None, overwrite=False):
+        if executor is None:
+            executor = Executor
+        self.overwrite = overwrite
+
+        with executor(max_workers=workers) as ex:
+            counts = sum(list(ex.map(self._annotate, self.pepfiles)))
+
+        pfile = os.path.join(self.out_dir, 'info.pkl')
+        info = pkl.load(open(pfile, 'rb'))
+
+        edited = False
+        if 'pyTorchVersion' not in info:
+            edited = True
+            info['pyTorchVersion'] = pkg_resources.get_distribution("torch").version
+        if 'CAMAPModels' not in info:
+            edited = True
+            info['modelANN'] = self.model_names
+        if 'numberPeptideContexts' not in info:
+            edited = True
+            info['numberPeptideContexts'] = counts
+
+        if edited:
+            info['date'] = datetime.now()
+            self._keep_a_copy(pfile)
+            pkl.dump(info, open(pfile, 'wb'))
+
+
+    def _annotate(self, pfile):
+        print(pfile)
+        pepdict = pkl.load(open(pfile, 'rb'))
+        models = self.models
+
+        counter = 0
+        edited = False
+        for pep, gene_dict in pepdict.items():
+            gene_dict = gene_dict['genes']
+            for gene_name, entries in gene_dict.items():
+                for entry in entries:
+                    seq = entry['sequenceContext']
+                    if '!GA' not in seq:
+                        counter += 1
+                        if self.overwrite:
+                            del entry['CAMAPScore']
+                        if 'CAMAPScore' not in entry:
+                            entry['CAMAPScore'] = {}
+                        for method in models:
+                            if method not in entry['CAMAPScore']:
+                                entry['CAMAPScore'][method] = {}
+                            for params in models[method]:
+                                if params not in entry['CAMAPScore'][method]:
+                                    entry['CAMAPScore'][method][params] = []
+                                    for model in models[method][params]:
+                                        score = float(model.get_seq_score_from_nt(seq)[0][1])
+                                        entry['CAMAPScore'][method][params].append(score)
+                                        edited = True
+            #break
+
+        if edited:
+            self._keep_a_copy(pfile)
+            pkl.dump(pepdict, open(pfile, 'wb'))
+
+        return counter
+
+
+    @staticmethod
+    def _keep_a_copy(pfile):
+        base_dir, file_name = pfile.rsplit('/', 1)
+        os.makedirs(os.path.join(base_dir, 'Backup'), exist_ok=True)
+        c = 0
+        while True:
+            f1 = pfile
+            f2 = os.path.join(base_dir, 'Backup', file_name.replace('.pkl', '.%d.pkl' % c))
+            try:
+                if os.path.isfile(f2):
+                    raise OSError
+                print('%s: Moving %s to %s and replacing with updated annotations.' % (pfile, f1, f2))
+                shutil.move(f1, f2)
+                subprocess.call(['gzip', f2], shell=False)
+                break
+            except OSError:
+                c += 1
+
+
+class Dataset(Peptides):
+    def __init__(self, genome, cellline):
+        super().__init__(genome)
+
         self.cellline = cellline
 
         # calculate synonymous codon frequencies
@@ -83,26 +226,18 @@ class Dataset(object):
         fn = 'detected.peptides.' + self.species + cellline
         massspec_file = [os.path.join(dr, f) for f in os.listdir(dr) if fn in f]
         assert len(massspec_file) == 1
-        self.massspec_file = massspec_file[0]
+        massspec_file = massspec_file[0]
+        with open(massspec_file, 'r') as f:
+            self.detected_peptides = set([l.strip() for l in f.readlines()])
 
         dr = 'data/expression'
         fn = 'isoforms.median.tpm.99p.' + self.species + cellline
         expression_file = [os.path.join(dr, f) for f in os.listdir(dr) if fn in f]
         assert len(expression_file) == 1
-        self.expression_file = expression_file[0]
- 
-        with open(self.massspec_file, 'r') as f:
-            self.detected_peptides = set([l.strip() for l in f.readlines()])
-
-        with open(self.expression_file, 'r') as f:
+        expression_file = expression_file[0]
+        with open(expression_file, 'r') as f:
             self.tpm_dct = {l.strip().split('\t')[0]:float(l.strip().split('\t')[1]) for l in f.readlines()}
-        #print(len(self.tpm_dct))
         #self.tpm_dct = {x:y for x, y in self.tpm_dct.items() if float(y)>0.1}
-        #print(len(self.tpm_dct))
-
-        # detect pickle peptide files
-        pepfiles = [os.path.join(self.out_dir, f) for f in os.listdir(self.out_dir) if f[:8] == 'peptides']
-        self.pepfiles = pepfiles
 
 
     def load_peptides(self, context_len=162, max_bs=1250, max_contexts=3, workers=0):
@@ -183,8 +318,8 @@ class Dataset(object):
                 else:
                     continue
             gene_entries = pinfo['genes']
-            rank = min([sc[var] for sc in mhc_scores.values()])
-            if rank < self.max_bs:
+            bs = min([sc[var] for sc in mhc_scores.values()])
+            if bs < self.max_bs:
                 contexts = []
                 transcripts = []
                 tr_set = set()
@@ -201,21 +336,16 @@ class Dataset(object):
                     pep_in_tr[pep] = tr_set
                     for i, (g_cont, tr) in enumerate(zip(contexts, transcripts)):
                         max_exp = max([self.tpm_dct[t] for t in tr])
-                        if '!GA' not in g_cont['sequenceContext']: #and if max_exp >= 1:
+                        if '!GA' not in g_cont['sequenceContext']:
                             peptides[ix][(pep, i)] = g_cont
                             pepexpr[(pep, i)] = max_exp
-                            pepbs[(pep, i)] = rank
+                            pepbs[(pep, i)] = bs
 
         return peptides[0], peptides[1], transdct, pep_in_tr, pepexpr, pepbs
 
 
-    def encode_peptides(self, ratio=5, same_tpm=False, seed=0, workers=0):
-        """ The current implementation splits the original dataset, and then shuffles sequences.
-        A direct consequence of this is when the same sequence is selected in more than 1 split,
-        the resulting shuffling may or may not (most probable) be the same.
-        """
-
-        print('Encoding dataset')
+    def split_dataset(self, ratio=5, same_tpm=False, seed=0):
+        print('Splitting dataset')
         print(len(self.peplist_source), len(self.peplist_nonsource))
 
         copy_tpm_distribution = same_tpm
@@ -223,13 +353,10 @@ class Dataset(object):
         #debug = False
 
         if copy_tpm_distribution:
-            import numpy as np
-            import math
-
             ns_exp = pd.Series(np.log2(np.array([self.pepexpr[pep] for pep in self.peplist_nonsource])))
             s_exp = np.log2(np.array([self.pepexpr[pep] for pep in self.peplist_source]))
 
-            start, end = -10, 10 
+            start, end = -10, 10
             l = [-np.inf] + list(range(start, end)) + [np.inf]
             bins = []
             try:
@@ -302,6 +429,15 @@ class Dataset(object):
         dct_pep['validation'][1], dct_pep['test'][1] = train_test_split(pre_test, test_size=0.5, random_state=seed)
 
         self.dct_pep = dct_pep
+
+
+    def encode_peptides(self, seed=0, workers=0):
+        """ The current implementation splits the original dataset, and then shuffles sequences.
+        A direct consequence of this is when the same sequence is selected in more than 1 split,
+        the resulting shuffling may or may not (most probable) be the same.
+        """
+
+        print('Encoding dataset')
 
         enc_dct = {
             'train': [[], []],
