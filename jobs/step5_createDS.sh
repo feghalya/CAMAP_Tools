@@ -26,22 +26,22 @@ mkdir -p log
 genome=GRCh38.98
 dataset=BLCL
 
-job_cmd="./constructTrainDS.py -w $(($workers-1)) -g $genome -d $dataset -s 12 -c 162 -r 500 -m 10 -t 5 -p 9"
+job_cmd="./makeTrainingDS.py -w $(($workers-1)) -g $genome -d $dataset -s 12 -c 162 -r 500 -m 10 -t 5 -p 9"
 job_name=${genome}_${dataset}_p9_t5
 runPBS "$job_cmd" "$job_name"
 
-job_cmd="./constructTrainDS.py -w $(($workers-1)) -g $genome -d $dataset -s 12 -c 162 -r 500 -m 10 -t 5 -p 9 -y"
+job_cmd="./makeTrainingDS.py -w $(($workers-1)) -g $genome -d $dataset -s 12 -c 162 -r 500 -m 10 -t 5 -p 9 -y"
 job_name=${genome}_${dataset}_p9_t5_y
 runPBS "$job_cmd" "$job_name"
 
-job_cmd="./constructTrainDS.py -w $(($workers-1)) -g $genome -d $dataset -s 12 -c 162 -r 500 -m 10 -t 25 -p 9"
+job_cmd="./makeTrainingDS.py -w $(($workers-1)) -g $genome -d $dataset -s 12 -c 162 -r 500 -m 10 -t 25 -p 9"
 job_name=${genome}_${dataset}_p9_t25
 runPBS "$job_cmd" "$job_name"
 
-job_cmd="./constructTrainDS.py -w $(($workers-1)) -g $genome -d $dataset -s 12 -c 162 -r 500 -m 10 -t 25 -p 9 -y"
+job_cmd="./makeTrainingDS.py -w $(($workers-1)) -g $genome -d $dataset -s 12 -c 162 -r 500 -m 10 -t 25 -p 9 -y"
 job_name=${genome}_${dataset}_p9_t25_y
 runPBS "$job_cmd" "$job_name"
 
-job_cmd="./constructTrainDS.py -w $(($workers-1)) -g $genome -d $dataset -s 12 -c 162 -r 500 -m 10 -t 5"
+job_cmd="./makeTrainingDS.py -w $(($workers-1)) -g $genome -d $dataset -s 12 -c 162 -r 500 -m 10 -t 5"
 job_name=${genome}_${dataset}_pall_t5
 runPBS "$job_cmd" "$job_name"

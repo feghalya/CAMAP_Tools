@@ -5,7 +5,7 @@ import pickle as pkl
 import argparse
 import gzip
 
-from MLP import CodonEmbeddings, Dataset
+from camaptools.MLP import CodonEmbeddings, Dataset
 
 
 def encode_dataset(genome, ds, peplen, context_len, max_bs, max_contexts, ratio, same_tpm, seeds, workers):
