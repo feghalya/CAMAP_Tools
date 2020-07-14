@@ -1,1 +1,1 @@
-jobs/step6_trainANN.sh
+jobs/step7_annotateProteome.sh

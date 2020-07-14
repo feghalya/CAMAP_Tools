@@ -17,8 +17,8 @@ import tarfile
 import camap.trainer as CAMAP
 
 #from pyGeno.tools.UsefulFunctions import codonTable, AATable, synonymousCodonsFrequencies
-from genomeData import codonTable, AATable, synonymousCodonsFrequencies
-from utils import available_models
+from camaptools.genomeData import codonTable, AATable, synonymousCodonsFrequencies
+from camaptools.utils import available_models
 
 
 OUTPUT_FOLDER = "./output"
@@ -416,9 +416,9 @@ class Dataset(Peptides):
                 else:
                     continue
             gene_entries = pinfo['genes']
-            mhc_scores = {al:mhc_scores[al] for al in mhc_scores if al in self.alleles])
+            mhc_scores = {al:mhc_scores[al] for al in mhc_scores if al in self.alleles}
             bs = min([sc[var] for sc in mhc_scores.values()])
-            logbs = max[sc['1-log50k'] for sc in mhc_scores.values()])
+            logbs = max([sc['1-log50k'] for sc in mhc_scores.values()])
             if bs < self.max_bs:
                 contexts = []
                 transcripts = []
