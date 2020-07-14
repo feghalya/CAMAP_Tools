@@ -65,7 +65,7 @@ class Model(CAMAP.Classifier):
         self.encoding = CodonEmbeddings()
         CAMAP.load_model(model, self, device)
 
-    def get_seq_score_from_nt(self, sequences):
+    def _get_embeds(self, sequences):
         if type(sequences) == str:
             sequences = [sequences]
         seq_embeddings = np.empty((self.padding * 2, len(sequences)), dtype=int)
@@ -74,6 +74,10 @@ class Model(CAMAP.Classifier):
                 sequence = sequence[:self.context]+sequence[-self.context:]
             sequence = self.encoding.encode(sequence)
             seq_embeddings[:,i] = sequence
+        return seq_embeddings
+
+    def get_seq_score_from_nt(self, sequences):
+        seq_embeddings = self._get_embeds(sequences)
         return self.get_score(seq_embeddings)
 
 
@@ -90,19 +94,20 @@ class Peptides(object):
         self.pepfiles = pepfiles
 
 
-    def load_models(self):
+    def load_models(self, context=162):
         def load():
             return available_models(
-                target = 'validation-bestMin-score.pytorch'
+                target = 'validation-bestMin-score.pytorch',
+                context = context,
+                epochs = 500
                 )
 
-        self.model_names = load()
+        self.model_names = {context: load()}
 
-        models = load()
-        for method, method_dct in models.items():
+        models = {context: load()}
+        for method, method_dct in models[context].items():
             for params, model_list in method_dct.items():
-                context_len = params[0]
-                method_dct[params] = [Model(m, context_len, 'cpu') for m in model_list]
+                method_dct[params] = [Model(m, context, 'cpu') for m in model_list]
         self.models = models
 
 
@@ -137,35 +142,74 @@ class Peptides(object):
             pkl.dump(info, open(pfile, 'wb'))
 
 
-    def _annotate(self, pfile):
+    def _annotate(self, pfile, chunk_size=10000):
+        """Assumes sequences are never modified, and will always run the same number of models on all sequence chunks
+        Assumes context size is the same for all models"""
+        import gc
         print(pfile)
-        pepdict = pkl.load(open(pfile, 'rb'))
         models = self.models
 
+        def run_models():
+            ix = seqs.keys()
+            s_list = seqs.values()
+            c, m, p = list(jobs)[0]
+            s_embeds = models[c][m][p][0]._get_embeds(s_list)
+            for c, m, p in jobs:
+                for i in ix:
+                    seq_scores[i][(m, c, p)] = []
+                for model in models[c][m][p]:
+                    scores = model.get_score(s_embeds)
+                    for i, s in zip(ix, scores):
+                        seq_scores[i][(m, c, p)].append(float(s[1]))
+
+        pepdict = pkl.load(open(pfile, 'rb'))
+
+        seq_scores = {}
+        seq_ids = {}
+        seqs = {}
+        jobs = set()
         counter = 0
-        edited = False
         for pep, gene_dict in pepdict.items():
             gene_dict = gene_dict['genes']
             for gene_name, entries in gene_dict.items():
-                for entry in entries:
+                for entry_i, entry in enumerate(entries):
                     seq = entry['sequenceContext']
                     if '!GA' not in seq:
                         counter += 1
+                        seq_ids[counter] = (pep, gene_name, entry_i)
+                        seqs[counter] = seq
+                        seq_scores[counter] = {}
                         if self.overwrite:
                             del entry['CAMAPScore']
-                        if 'CAMAPScore' not in entry:
-                            entry['CAMAPScore'] = {}
-                        for method in models:
-                            if method not in entry['CAMAPScore']:
-                                entry['CAMAPScore'][method] = {}
-                            for params in models[method]:
-                                if params not in entry['CAMAPScore'][method]:
-                                    entry['CAMAPScore'][method][params] = []
-                                    for model in models[method][params]:
-                                        score = float(model.get_seq_score_from_nt(seq)[0][1])
-                                        entry['CAMAPScore'][method][params].append(score)
-                                        edited = True
-            #break
+                        for context in models:
+                            for method in models[context]:
+                                for params in models[context][method]:
+                                    if 'CAMAPScore' not in entry:
+                                        entry['CAMAPScore'] = {}
+                                    if method not in entry['CAMAPScore']:
+                                        entry['CAMAPScore'][method] = {}
+                                    if context not in entry['CAMAPScore'][method]:
+                                        entry['CAMAPScore'][method][context] = {}
+                                    if params not in entry['CAMAPScore'][method][context]:
+                                        entry['CAMAPScore'][method][context][params] = []
+                                        jobs.add((context, method, params))
+                    if len(seqs) == chunk_size:
+                        run_models()
+                        jobs = set()
+                        seqs = {}
+                        gc.collect()
+            #if counter >= 1000:
+            #    break
+        if jobs:
+            run_models()
+
+        # Fill dictionnary
+        edited = False
+        for ix in seq_scores:
+            pep, gene_name, entry_i = seq_ids[ix]
+            for (m, c, p), scores in seq_scores[ix].items():
+                pepdict[pep]['genes'][gene_name][entry_i]['CAMAPScore'][m][c][p] = scores
+                edited = True
 
         if edited:
             self._keep_a_copy(pfile)

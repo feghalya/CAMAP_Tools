@@ -33,6 +33,7 @@ def main():
     print('Overwrite: ', overwrite)
 
     peptides = Peptides(genome)
+    #peptides.pepfiles = [x for x in peptides.pepfiles if 'W8' in x]
     peptides.load_models()
     peptides.annotate(workers=workers, executor=Executor, overwrite=overwrite)
 
