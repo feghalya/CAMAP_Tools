@@ -1,1 +1,1 @@
-jobs/step7_annotateProteome.sh
+jobs/step2_calcNetMHC.sh

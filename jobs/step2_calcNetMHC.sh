@@ -3,20 +3,39 @@
 name=calc_netMHC
 date=`date +%Yy%mm%dd_%Hh%Mm%Ss`
 
-njobs=0
+# number of maximum jobs allowed
+maxjobs=1000
+
+# number of already running jobs
+njobs=500
+
+# do not submit job ids lower than this
+min=1
+
+# torque or slurm
+if command -v qsub >/dev/null 2>&1
+then
+    scheduler_array_var=PBS_ARRAYID
+else
+    scheduler_array_var=SLURM_ARRAY_TASK_ID
+fi
+
 
 function runPBS {
     genome=$1
+    NP=$2  # suffix to use if binding score (BA) not required
     fullname=${name}_${genome}
     echo $fullname
 
     netmhc_dir=NetMHCpan-4.0a
 
+    if [ -z "$NP" ]; then BA='-BA '; else BA=; fi
+
     pushd output/allPeptides_$genome
 
     if [ ! -d $netmhc_dir/peptides ]
     then
-        mkdir $netmhc_dir/peptides
+        mkdir -p $netmhc_dir/peptides
         # remove selenocysteines not understood by netMHCpan
         time cat proteome.wide.peptides.txt | grep -v U |\
             awk -v dir=$netmhc_dir/peptides '{
@@ -28,7 +47,8 @@ function runPBS {
     if [[ $genome == "GRCh"* ]]
     then
         alleles=`cat ../../data/alleles/Human.tsv | cut -f 1 | tail -n +2 | head -n -1`
-    else
+    elif [[ $genome == "GRCm"* ]]
+    then
         alleles=`cat ../../data/alleles/Mouse.tsv | cut -f 1 | tail -n +2`
     fi
 
@@ -68,67 +88,95 @@ function runPBS {
     # check for already completed jobs
     cc=
     shopt -s nullglob
-    exist=(output/allPeptides_$genome/$netmhc_dir/done/*.done)
+    exist=(output/allPeptides_$genome/$netmhc_dir/done/*${NP}.done)
     shopt -u nullglob
     if [ -z "$exist" ]
     then
         ic=$c
-        max=$((1000-njobs))
+        max=$((maxjobs+min-1-njobs))
         if [ $ic -gt $max ]
         then
             ic=$max
         fi
         if [ $ic -gt 0 ]
         then
-            cc=1-$ic
-            njobs=$((njobs+ic))
+            cc=$min-$ic
+            njobs=$((njobs+ic-min+1))
         fi
     else
         for ic in `seq 1 $c` 
         do
-            if [ $njobs -lt 1000 ]
+            if [ $njobs -lt $maxjobs ]
             then
-                if [ ! -f output/allPeptides_$genome/$netmhc_dir/done/$ic-*.done ]
+                if [ $ic -ge $min ] && [ ! -f output/allPeptides_$genome/$netmhc_dir/done/$ic-*${NP}.done ]
                 then
-                    cc=$cc,$ic
+                    if [ -z "$cc" ]
+                    then
+                        cc=$ic-$ic
+                    elif [ $(expr $(echo $cc | rev | cut -d '-' -f 1 | rev) + 1) -eq $ic ]
+                    then
+                        cc=$(echo $cc | rev | cut -d '-' -f 2- | rev)-$ic
+                    else
+                        cc=$cc,$ic-$ic
+                    fi
                     njobs=$((njobs+1))
                 fi
             fi
         done
-        cc=`echo $cc | cut -c 2-`
     fi
 
     mkdir -p log/netmhcpan/tmp
     mkdir -p output/allPeptides_$genome/$netmhc_dir/predictions
     mkdir -p output/allPeptides_$genome/$netmhc_dir/done
 
-    #echo $cc
-    #echo $njobs
-    
+    echo "jobs: $cc"
+    echo "njobs: $njobs"
+
     if [ -z $cc ]
     then
         return
     fi
 
-    echo '
+    cmd='#!/usr/bin/env bash''
+    echo $'$scheduler_array_var'
     export TMPDIR=/tmp
     TMPDIR=`mktemp -d`
     mkdir -p $TMPDIR
     module load netmhcpan/4.0a
-    file=`ls output/allPeptides_'$genome'/'$netmhc_dir'/jobs/${PBS_ARRAYID}-*`
+    file=`ls output/allPeptides_'$genome'/'$netmhc_dir'/jobs/${'$scheduler_array_var'}-*`
     f=`basename $file`
     letter=`basename $file | cut -d "." -f 1 | cut -d "-" -f 2`
     length=`basename $file | cut -d "." -f 2`
     alleles=`basename $file | cut -d "." -f 3`
     for allele in ${alleles//_/ }
     do
-        out=output/allPeptides_'$genome'/'$netmhc_dir'/predictions/$letter.$length.$allele.tsv
-        tmpout=log/netmhcpan/tmp/$letter.$length.$allele.log
-        netMHCpan -p -BA -a $allele -l $length -f $file -xls -xlsfile $out > $tmpout
+        out=output/allPeptides_'$genome'/'$netmhc_dir'/predictions/$letter.$length.$allele'$NP'.tsv
+        tmpout=log/netmhcpan/tmp/$letter.$length.$allele'$NP'.log
+        netMHCpan -p '$BA'-a $allele -l $length -f $file -xls -xlsfile $out > $tmpout
     done
-    touch output/allPeptides_'$genome'/'$netmhc_dir'/done/$f.done
-    ' | qsub -l nodes=1:ppn=1,walltime=24:00:00,pmem=2gb -d $PWD -N $fullname -o log/netmhcpan -e log/netmhcpan -t $cc
+    touch output/allPeptides_'$genome'/'$netmhc_dir'/done/$f'$NP'.done
+    '
+
+    echo "$cmd"
+
+    if [ $scheduler_array_var = "PBS_ARRAYID" ]
+    then
+        echo "$cmd" |\
+             qsub -l nodes=1:ppn=1,walltime=24:00:00,pmem=2gb -d $PWD -N $fullname \
+                 -o log/netmhcpan -e log/netmhcpan -t $cc
+    elif [ $scheduler_array_var = "SLURM_ARRAY_TASK_ID" ]
+    then
+        echo "$cmd" |\
+            sbatch --export ALL --account $RAP_ID --workdir $PWD --time 0-12:00:00 --nodes 1 --cpus-per-task 1 \
+                --mem-per-cpu 2gb --array $cc --output log/netmhcpan/$fullname.$date.%A_%j_%a.log \
+                --error log/netmhcpan/$fullname.$date.%A_%j_%a.err --job-name $fullname
+    fi
 }
 
-runPBS GRCm38.98
+
+runPBS GRCh37.75
+runPBS GRCh37.75 .NP
+runPBS GRCm38.78
+runPBS GRCm38.78 .NP
 runPBS GRCh38.98
+runPBS GRCm38.98

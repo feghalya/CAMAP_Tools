@@ -143,8 +143,12 @@ class Peptides(object):
 
 
     def _annotate(self, pfile, chunk_size=10000):
-        """Assumes sequences are never modified, and will always run the same number of models on all sequence chunks
-        Assumes context size is the same for all models"""
+        """
+        Assumes sequences are never modified, will always run the same number of models
+        on all sequence chunks.
+        Assumes context size is the same for all models.
+
+        """
         import gc
         print(pfile)
         models = self.models
