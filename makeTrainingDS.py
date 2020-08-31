@@ -9,13 +9,13 @@ from camaptools.MLP import CodonEmbeddings, Dataset
 
 
 def encode_dataset(genome, ds, peplen, context_len, max_bs, max_contexts, ratio, same_tpm, seeds, workers):
-    dat = Dataset(genome, ds)
+    dat = Dataset(genome, ds, context_len)
     dat.pepfiles = [f for f in dat.pepfiles if '%s.pkl' % peplen in f]
     dat.load_peptides(max_bs=max_bs, max_contexts=max_contexts, workers=workers)
 
     for seed in seeds:
         dat.split_dataset(ratio=ratio, same_tpm=same_tpm, seed=seed):
-        dat.encode_peptides(context_len=context_len, seed=seed, workers=workers)
+        dat.encode_peptides(seed=seed, workers=workers)
 
         if not os.path.exists('output/trainDS'):
             os.makedirs('output/trainDS')

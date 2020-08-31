@@ -17,7 +17,7 @@ import tarfile
 import camap.trainer as CAMAP
 
 #from pyGeno.tools.UsefulFunctions import codonTable, AATable, synonymousCodonsFrequencies
-from camaptools.genomeData import codonTable, AATable, synonymousCodonsFrequencies
+from camaptools.GenomeData import codonTable, AATable, synonymousCodonsFrequencies
 from camaptools.utils import available_models
 
 
@@ -82,32 +82,34 @@ class Model(CAMAP.Classifier):
 
 
 class Peptides(object):
-    def __init__(self, genome):
+    def __init__(self, genome, context=162):
         self.output_folder = OUTPUT_FOLDER
         self.genome = genome
         assert 'GRCh' in genome or 'GRCm' in genome
         self.out_dir = os.path.join(self.output_folder, 'allPeptides_%s' % self.genome)
         self.species = 'Human' if 'GRCh' in genome else 'Mouse'
 
+        self.context = context
+
         # detect pickle peptide files
         pepfiles = [os.path.join(self.out_dir, f) for f in os.listdir(self.out_dir) if f[:8] == 'peptides']
         self.pepfiles = pepfiles
 
 
-    def load_models(self, context=162):
+    def load_models(self):
         def load():
             return available_models(
                 target = 'validation-bestMin-score.pytorch',
-                context = context,
-                epochs = 500
+                context = self.context,
+                epochs = 500  # hard coded for now
                 )
 
-        self.model_names = {context: load()}
+        self.model_names = {self.context: load()}
 
-        models = {context: load()}
-        for method, method_dct in models[context].items():
+        models = {self.context: load()}
+        for method, method_dct in models[self.context].items():
             for params, model_list in method_dct.items():
-                method_dct[params] = [Model(m, context, 'cpu') for m in model_list]
+                method_dct[params] = [Model(m, self.context, 'cpu') for m in model_list]
         self.models = models
 
 
@@ -336,10 +338,12 @@ class Peptides(object):
 
 
 class Dataset(Peptides):
-    def __init__(self, genome, cellline):
-        super().__init__(genome)
+    def __init__(self, genome, cellline, context=162):
+        super().__init__(genome, context)
 
         self.cellline = cellline
+
+        self.dataset_name = self.species + '_' + self.cellline
 
         # calculate synonymous codon frequencies
         try:
@@ -352,7 +356,7 @@ class Dataset(Peptides):
                 synonymousCodonsFrequencies[aa] = {c:ct for c, ct in zip(cods, counts)}
         except FileNotFoundError:
             print('output/codonCounts/%s.tsv not found, loading from pyGeno' % self.genome)
-            #from pyGeno.tools.UsefulFunctions import synonymousCodonsFrequencies
+            from pyGeno.tools.UsefulFunctions import synonymousCodonsFrequencies
 
         self.encoding = CodonEmbeddings(synonymousCodonsFrequencies)
 
@@ -387,7 +391,7 @@ class Dataset(Peptides):
 
 
     def load_peptides(self, max_bs=1250, max_contexts=3, workers=0,
-            step='createDS', ann_method='Adam', ann_params=(162, 500, '9', 't5')):
+            step='createDS', ann_method='Adam', ann_params='pep9t5'):
         self.max_bs = max_bs
         self.max_contexts = max_contexts
         self.step = step
@@ -497,7 +501,7 @@ class Dataset(Peptides):
                                 dct = g_cont['CAMAPScore']
                                 dct = {k:dct[k] for k in dct if k.split('_')[0] == self.ann_method}
                                 for key in dct:
-                                    dct[key] = dct[key][self.ann_params]
+                                    dct[key] = dct[key][self.context][self.ann_params]
                                 peptides[ix][(pep, i)] = dct
                             else:
                                 sys.stderr.write('ERROR: Unknown option given to step argument')
@@ -575,7 +579,7 @@ class Dataset(Peptides):
         self.dct_pep = dct_pep
 
 
-    def encode_peptides(self, context_len=162, seed=0, workers=0):
+    def encode_peptides(self, seed=0, workers=0):
         """ The current implementation splits the original dataset, and then shuffles sequences.
         A direct consequence of this is when the same sequence is selected in more than 1 split,
         the resulting shuffling may or may not (most probable) be the same.
@@ -620,7 +624,7 @@ class Dataset(Peptides):
                     for ix in range(0, len(dct_pep[ds][i]), chunk_size):
                         pep_list = dct_pep[ds][i][ix:ix+chunk_size]
                         meta_lst = [self.peptides[i][pep] for pep in pep_list]
-                        future = ex.submit(self._encode, self.encoding, meta_lst, context_len, iterseed+ix)
+                        future = ex.submit(self._encode, self.encoding, meta_lst, self.context, iterseed+ix)
                         futures[future] = (ds, i)
             print('Futures: %d' % len(futures))
             for future in as_completed(futures):
@@ -634,7 +638,7 @@ class Dataset(Peptides):
                     iterseed += 1
                     pep_list = dct_pep[ds][i]
                     meta_lst = [self.peptides[i][pep] for pep in pep_list]
-                    res = self._encode(self.encoding, meta_lst, context_len, iterseed)
+                    res = self._encode(self.encoding, meta_lst, self.context, iterseed)
                     fill_dcts(ds, i, res)
 
         self.meta_dct = meta_dct
