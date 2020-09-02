@@ -7,7 +7,7 @@ date=`date +%Yy%mm%dd_%Hh%Mm%Ss`
 maxjobs=1000
 
 # number of already running jobs
-njobs=500
+njobs=0
 
 # do not submit job ids lower than this
 min=1
@@ -24,12 +24,19 @@ fi
 function runPBS {
     genome=$1
     NP=$2  # suffix to use if binding score (BA) not required
+
+    if [ -z "$NP" ]; then BA='-BA '; else BA=; fi
+
     fullname=${name}_${genome}
     echo $fullname
 
     netmhc_dir=NetMHCpan-4.0a
 
-    if [ -z "$NP" ]; then BA='-BA '; else BA=; fi
+    if [ -f output/allPeptides_$genome/$netmhc_dir.tar.gz ]
+    then
+        echo "Analysis already completed for genome $genome"
+        return
+    fi
 
     pushd output/allPeptides_$genome
 
@@ -49,7 +56,7 @@ function runPBS {
         alleles=`cat ../../data/alleles/Human.tsv | cut -f 1 | tail -n +2 | head -n -1`
     elif [[ $genome == "GRCm"* ]]
     then
-        alleles=`cat ../../data/alleles/Mouse.tsv | cut -f 1 | tail -n +2`
+        alleles=`cat ../../data/alleles/Mouse.tsv | cut -f 1 | tail -n +2 | head -n -1`
     fi
 
     mkdir -p  $netmhc_dir/jobs
@@ -88,7 +95,7 @@ function runPBS {
     # check for already completed jobs
     cc=
     shopt -s nullglob
-    exist=(output/allPeptides_$genome/$netmhc_dir/done/*${NP}.done)
+    exist=(output/allPeptides_$genome/$netmhc_dir/done/*[0-9bd]${NP}.done)
     shopt -u nullglob
     if [ -z "$exist" ]
     then
@@ -108,7 +115,7 @@ function runPBS {
         do
             if [ $njobs -lt $maxjobs ]
             then
-                if [ $ic -ge $min ] && [ ! -f output/allPeptides_$genome/$netmhc_dir/done/$ic-*${NP}.done ]
+                if [ $ic -ge $min ] && [ ! -f output/allPeptides_$genome/$netmhc_dir/done/$ic-*[0-9bd]${NP}.done ]
                 then
                     if [ -z "$cc" ]
                     then
@@ -162,7 +169,7 @@ function runPBS {
     if [ $scheduler_array_var = "PBS_ARRAYID" ]
     then
         echo "$cmd" |\
-             qsub -l nodes=1:ppn=1,walltime=24:00:00,pmem=2gb -d $PWD -N $fullname \
+             qsub -l nodes=1:ppn=1:bioinfo,walltime=24:00:00,pmem=2gb -d $PWD -N $fullname \
                  -o log/netmhcpan -e log/netmhcpan -t $cc
     elif [ $scheduler_array_var = "SLURM_ARRAY_TASK_ID" ]
     then
