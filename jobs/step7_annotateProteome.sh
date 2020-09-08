@@ -8,10 +8,12 @@ function runPBS {
     genome=$1
     fullname=${name}_${genome}
     echo $fullname
+    filters=$2
+    if [ ! -z $filters ]; then filters="-f $filters "; fi
 
     echo '#!/usr/bin/env bash'"
 source /home/feghalya/.virtualenvs/ml/bin/activate
-time srun -n $workers python -m mpi4py.futures ./annotateProteome.py -g $genome -w $(($workers-1)) --mpi
+time srun -n $workers python -m mpi4py.futures ./annotateProteome.py -g $genome -w $(($workers-1)) ${filters}--mpi
 sleep 5
 sacct --format=JobID%15,State,ExitCode,CPUTime,MaxRSS,Start,End --units M -j \$SLURM_JOBID
 " | sbatch --account $RAP_ID --workdir $PWD --time 0-6:00:00 --ntasks $workers --cpus-per-task 8 \
@@ -20,5 +22,7 @@ sacct --format=JobID%15,State,ExitCode,CPUTime,MaxRSS,Start,End --units M -j \$S
 
 
 module purge
-runPBS GRCh38.98
-runPBS GRCm38.98
+runPBS GRCh37.75 SGD,SGD_Shuffle
+runPBS GRCm38.78 SGD,SGD_Shuffle
+#runPBS GRCh38.98 Adam,Adam_Shuffle
+#runPBS GRCm38.98 Adam,Adam_Shuffle

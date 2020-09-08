@@ -97,12 +97,12 @@ class Peptides(object):
         self.pepfiles = pepfiles
 
 
-    def load_models(self):
+    def load_models(self, filters=None):
         def load():
             return available_models(
                 target = 'validation-bestMin-score.pytorch',
                 context = self.context,
-                epochs = 500  # hard coded for now
+                filters = filters
                 )
 
         self.model_names = {self.context: load()}
