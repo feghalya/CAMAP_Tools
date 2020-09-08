@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import shutil
 import subprocess
+from collections import defaultdict
 import math
 import pkg_resources
 from datetime import datetime
@@ -228,12 +229,11 @@ class Peptides(object):
         if executor is None:
             executor = Executor
         self.overwrite = overwrite
-
-        self.columns_to_keep = ['Peptide', '1-log50k', 'nM', 'Rank']
+        self.columns_to_keep = ['Peptide', 'nM', 'Rank']
 
         netmhc_folder = 'NetMHCpan-4.0a'
         nmpan_out = os.path.join(self.out_dir, netmhc_folder)
-        nmpan_pred = os.path.join(nmpan_out, 'predictions')
+        nmpan_pred_dir = os.path.join(nmpan_out, 'predictions')
 
         if not os.path.exists(nmpan_out):
             if os.path.exists(nmpan_out + '.tar.gz'):
@@ -243,25 +243,31 @@ class Peptides(object):
                 sys.stderr.write('ERROR: Predictions folder not found.\n')
                 sys.exit(1)
 
-        job_dct = defaultdict(list)
-        for fn_allele in os.listdir(nmpan_pred):
+        # Prepare jobs
+        job_dct = defaultdict(lambda: [[], []])
+        for fn_allele in os.listdir(nmpan_pred_dir):
             pinit, plen = fn_allele.split('.')[:2]
-            pfile = 'peptides_%s%s.pkl' % (pinit, plen)
-            job_dct[os.path.join(out_dir, pfile)].append(os.path.join(nmpan_pred, fn_allele))
+            pfile = os.path.join(self.out_dir, 'peptides_%s%s.pkl' % (pinit, plen))
+            if fn_allele.split('.')[3] == 'tsv':
+                job_dct[pfile][0].append(os.path.join(nmpan_pred_dir, fn_allele))
+            elif fn_allele.split('.')[3] == 'NP':
+                job_dct[pfile][1].append(os.path.join(nmpan_pred_dir, fn_allele))
 
+        # Run jobs
         if workers:
             with executor(max_workers=workers) as ex:
-                allele_sets = ex.map(self._merge_netmhc, *zip(*job_dct.items()))
+                allele_sets = ex.map(self._merge_netmhc, tuple(job_dct.keys()), *zip(*job_dct.values()))
+                exit_code = self._tar_compress(nmpan_out)  # run while peptide files are being filled
         else:
-            allele_sets = map(self._merge_netmhc, *zip(*job_dct.items()))
+            allele_sets = list(map(self._merge_netmhc, tuple(job_dct.keys()), *zip(*job_dct.values())))
+            exit_code = self._tar_compress(nmpan_out)  # run after peptide files are filled
 
+        # Update info file
         alleles = set()
         for al in allele_sets:
             alleles.update(al)
-
-        pfile = os.path.join(out_dir, 'info.pkl')
+        pfile = os.path.join(self.out_dir, 'info.pkl')
         info = pkl.load(open(pfile, 'rb'))
-
         edited = False
         if 'allelesNetMHC' not in info:
             info['NetMHCVersion'] = set([netmhc_folder])
@@ -269,51 +275,62 @@ class Peptides(object):
         if 'allelesNetMHC' not in info:
             info['allelesNetMHC'] = alleles
             edited = True
-
         if edited:
             info['date'] = datetime.now()
             self._keep_a_copy(pfile)
             pkl.dump(info, open(pfile, 'wb'))
 
-        with tarfile.open(nmpan_out + '.tar.gz', 'w:gz') as tar:
-            tar.add(nmpan_out, arcname=os.path.basename(nmpan_out))
-        shutil.rmtree(nmpan_out)
+        # Delete NetMHC folder if compression was successful
+        if exit_code:
+            print('WARNING: tar compression failed for some reason')
+        else:
+            shutil.rmtree(nmpan_out)
 
 
-    def _merge_netmhc(self, pfile, netmhc_out_list):
+    def _merge_netmhc(self, pfile, netmhc_ba_out_list, netmhc_np_out_list):
         print(pfile)
         pepdict = pkl.load(open(pfile, 'rb'))
 
-        dfs = []
-        for fn in netmhc_out_list:
-            with open(fn, 'r') as f:
-                allele = f.readline().strip().replace(':', '')
-            temp_df = pd.read_csv(fn, sep='\t', skiprows=[0], header=0, usecols=self.columns_to_keep, index_col=0)
-            dfs.append(temp_df)
-            dfs[-1].columns = pd.MultiIndex.from_product([[allele], dfs[-1].columns])
-
-        df = pd.concat(dfs, axis=1, sort=False, copy=False)
-
         edited = False
         alleles = set()
-        for pep, scores in df.to_dict(orient='index').items():
+
+        def concat(file_list):
+            dfs = []
+            for fn in file_list:
+                with open(fn, 'r') as f:
+                    allele = f.readline().strip().replace(':', '')
+                    temp_df = pd.read_csv(f, sep='\t', header=0, usecols=self.columns_to_keep, index_col=0)
+                temp_df.columns = pd.MultiIndex.from_product([[allele], temp_df.columns])
+                dfs.append(temp_df)
+            df = pd.concat(dfs, axis=1, sort=False, copy=False)
+            return df
+
+        ba_df = concat(netmhc_ba_out_list)
+        np_df = concat(netmhc_np_out_list)
+        np_df = np_df.drop('nM', axis=1, level=1)
+        np_df.columns = np_df.columns.set_levels(np_df.columns.levels[1] + '_NP', level=1, verify_integrity=False) 
+        df_full = pd.concat([ba_df, np_df], axis=1, sort=False, copy=False).sort_index(axis=1)
+
+        for pep, scores in df_full.to_dict(orient='index').items():
             if self.overwrite:
-                del pepdict[pep]['netmhcpan']
+                try:
+                    del pepdict[pep]['netmhcpan']
+                except KeyError:
+                    pass
             if 'netmhcpan' not in pepdict[pep]:
                 d = defaultdict(dict)
                 for allele, s in scores.items():
                     al, t = allele
                     alleles.add(al)
                     d[al][t] = s
-                d = dict(d)
-                pepdict[pep]['netmhcpan'] = d
+                pepdict[pep]['netmhcpan'] = dict(d)
                 edited = True
 
         if edited:
             self._keep_a_copy(pfile)
             pkl.dump(pepdict, open(os.path.join(pfile), 'wb'))
         else:
-            print('$s: Nothing changed, keeping everything as is.' % pfile)
+            print('%s: Nothing changed, keeping everything as is.' % pfile)
 
         return alleles
 
@@ -335,6 +352,14 @@ class Peptides(object):
                 break
             except OSError:
                 c += 1
+
+
+    @staticmethod
+    def _tar_compress(folder):
+        #with tarfile.open(folder + '.tar.gz', 'w:gz') as tar:
+        #    tar.add(nmpan_out, arcname=os.path.basename(nmpan_out))
+        exit_code = subprocess.call(['tar', 'cf', folder + '.tar.gz', folder], shell=False)
+        return exit_code
 
 
 class Dataset(Peptides):

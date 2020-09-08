@@ -11,7 +11,7 @@ def main():
     parser.add_argument("-w", "--workers", type=int, default=1, help="number of parallel workers in addition to main")
     parser.add_argument("-g", "--genome", help="genome [GRCh37.75, GRCm38.78, etc.]", type=str, default="GRCh37.75")
     parser.add_argument("--mpi", help="Parallelize using MPI", action='store_true')
-    parser.add_argument("--force", "--workers", help="Overwrite previous NetMHC score values", action='store_true')
+    parser.add_argument("--force", help="Overwrite previous NetMHC score values", action='store_true')
 
     args=parser.parse_args().__dict__
 

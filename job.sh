@@ -1,1 +1,1 @@
-jobs/step2_calcNetMHC.sh
+jobs/step3_mergeNetMHC.sh
