@@ -174,7 +174,7 @@ function runPBS {
     elif [ $scheduler_array_var = "SLURM_ARRAY_TASK_ID" ]
     then
         echo "$cmd" |\
-            sbatch --export ALL --account $RAP_ID --workdir $PWD --time 0-12:00:00 --nodes 1 --cpus-per-task 1 \
+            sbatch --export ALL --account $RAP_ID --chdir $PWD --time 0-12:00:00 --nodes 1 --cpus-per-task 1 \
                 --mem-per-cpu 2gb --array $cc --output log/netmhcpan/$fullname.$date.%A_%j_%a.log \
                 --error log/netmhcpan/$fullname.$date.%A_%j_%a.err --job-name $fullname
     fi

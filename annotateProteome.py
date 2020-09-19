@@ -2,14 +2,14 @@
 
 import argparse
 
-from camaptools.MLP import Peptides
+from camaptools.Peptides import Peptides
 
 
 def main():
     parser=argparse.ArgumentParser()
 
-    parser.add_argument("-w", "--workers", help="Number of parallel workers in addition to main", type=int, default=1)
-    parser.add_argument("-g", "--genome", help="Genome [GRCh37.75, GRCm38.78, etc.]", type=str, default="GRCh37.75")
+    parser.add_argument("-w", "--workers", help="Number of parallel workers in addition to main", type=int, default=0)
+    parser.add_argument("-g", "--genome", help="Genome [GRCh37.75; GRCm38.78; etc.]", type=str, default="GRCh37.75")
     parser.add_argument("-c", "--context", help="mRNA context length on each side", type=int, default=162)
     parser.add_argument("-f", "--filters", help="Whitelist of models (all if not specified)", type=str, default="")
     parser.add_argument("--mpi", help="Parallelize using MPI", action='store_true')
@@ -32,6 +32,8 @@ def main():
         Executor = None # use default
 
     print('Genome:', genome)
+    print('Context:', context)
+    print('Filters:', filters)
     print('Workers: ', workers)
     print('MPI: ', mpi)
     print('Overwrite: ', overwrite)

@@ -1,149 +1,183 @@
 #!/usr/bin/env python3
 
 import os
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 import numpy as np
 import pandas as pd
-from datetime import datetime
-import json
-import gzip
-from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegressionCV
 from sklearn import metrics
+from functools import partial
+import gc
+import pickle as pkl
+import gzip
+import json
+from datetime import datetime
 
-from camaptools.MLP import Dataset
 from camaptools.EnhancedFutures import EnhancedProcessPoolExecutor, EnhancedMPIPoolExecutor
 
 # https://scikit-learn.org/stable/modules/generated/sklearn.metrics.classification_report.html : Note that in binary classification, recall of the positive class is also known as “sensitivity”; recall of the negative class is “specificity”.
 
 
-OUTPUT_FOLDER = "./output"
+Results = namedtuple('Results', ['df_results', 'df_results_max', 'df_coef', 'df_scores', 'auc_data'])
 
 
-class RegressionDataset(Dataset):
-    def organize_data(self):
-        """
-        self.load_peptides needs to be executed for all required variables to get populated
-        """
-        df_dictionnaries = [[], []]
-
-        for sns in [0, 1]:
-            df_dct = {
-                'Peptide': [],
-                'logBS': [],
-                'logTPM': [],
-                'ANNScore': defaultdict(list),
-                'ANNShuffleScore': defaultdict(list)
-                }
-
-            for pep in self.peptides[sns]:
-                p = pep[0]
-                expressions = self.pepexpr[pep]
-                bs_score = self.pepbs[p]
-                ann_score = self.peptides[sns][pep][self.ann_method]
-                ann_shuf_score = self.peptides[sns][pep][self.ann_method + '_Shuffle']
-                for e in expressions:
-                    df_dct['Peptide'].append(p)
-                    df_dct['logBS'].append(bs_score)
-                    df_dct['logTPM'].append(np.log10(e))
-                    for i, v in enumerate(ann_score):
-                        df_dct['ANNScore'][i].append(v)
-                    for i, v in enumerate(ann_shuf_score):
-                        df_dct['ANNShuffleScore'][i].append(v)
-
-            df_dct['ANNScore'] = [df_dct['ANNScore'][k] for k in sorted(df_dct['ANNScore'])]
-            df_dct['ANNShuffleScore'] = [df_dct['ANNShuffleScore'][k] for k in sorted(df_dct['ANNShuffleScore'])]
-
-            assert len(df_dct['ANNScore']) == len(df_dct['ANNShuffleScore'])
-            n_replicates = len(df_dct['ANNScore'])
-
-            df_dct['Peptide'] = [df_dct['Peptide']]*n_replicates
-            df_dct['logBS'] = [df_dct['logBS']]*n_replicates
-            df_dct['logTPM'] = [df_dct['logTPM']]*n_replicates
-
-            for r in range(n_replicates):
-                subdct = {c:df_dct[c][r] for c in df_dct}
-                df_dictionnaries[sns].append(subdct)
-
-        self.df_dictionnaries = df_dictionnaries
-
-
-    def construct_datasets(self):
-        def split_df(df, seed=0):
-            ix_train, ix_test = train_test_split(df.index.unique(), test_size=0.3, random_state=seed)
-            df_train = df.loc[ix_train]
-            df_test = df.loc[ix_test]
-            return df_train, df_test
-
-        self.datasets = []
-
-        for i, (ns, s) in enumerate(zip(*self.df_dictionnaries)):
-            seed = i+1
-
-            # Merge and normalize data
-            df_ns = pd.DataFrame(ns).set_index('Peptide')
-            df_ns['Class'] = False
-            df_s = pd.DataFrame(s).set_index('Peptide')
-            df_s['Class'] = True
-
-            df = pd.concat([df_ns, df_s], axis=0)
-            for x in ['logBS', 'logTPM', 'ANNScore', 'ANNShuffleScore']:
-                df[x] = df[x] - min(df[x])
-                df[x] = df[x] / max(df[x])
-
-            # Unmerge normalized data
-            df_ns = df[~df.Class]
-            df_s = df[df.Class]
-
-            # Split source and non-source datasets
-            df_ns_training, df_ns_test = split_df(df_ns, seed)
-            df_s_training, df_s_test = split_df(df_s, seed)
-
-            # Re-format into training and test datasets
-            df_training = pd.concat([df_ns_training, df_s_training], axis=0)
-            df_test = pd.concat([df_ns_test, df_s_test], axis=0)
-
-            self.datasets.append((df_training, df_test))
-
-
-class RegressionManager(object):
-    def __init__(self, regression_dataset, workers, mpi=False):
-        self.dataset = regression_dataset
+class RegressionMetaManager(object):
+    """A wrapper around RegressionManagers that also takes care of running and distributing jobs for Datasets
+    """
+    def __init__(self, datasets, out_dir, workers, executor=None):
+        self.out_dir = out_dir
         self.workers = workers
-        self.executor = EnhancedMPIPoolExecutor if mpi else EnhancedProcessPoolExecutor
-        self.trainers = []
-        self.processes = []
+        self.executor = EnhancedProcessPoolExecutor if executor is None else executor
+
+        self.managers = [RegressionManager(dat, self.workers, self.executor) for dat in datasets]
+        for rem in self.managers:
+            rem.dataset.workers = self.workers
+            rem.dataset.executor = self.executor
 
 
-    def initialize_trainers(self):
-        for i, dat in enumerate(self.dataset.datasets):
-            seed = i+1
-            self.trainers.append(RegressionTrainer(dat, seed))
+    def set_load_peptides_options(self, *args, **kwargs):
+        self.load_peptides_args = args
+        self.load_peptides_kwargs = kwargs
 
 
-    def start(self):
-        self.ex = self.executor(max_workers=self.workers)
-        for t in self.trainers:
-            p = self.ex.submit(t.run)
-            self.processes.append(p)
-        print(self.ex)
-        self.ex.run()  # takes care of threads in main
+    def run(self):
+        results = defaultdict(lambda: defaultdict(list))
+        for rem in self.managers:
+            print(rem.name)
+            self._run(rem, self.load_peptides_args, self.load_peptides_kwargs)
+            for subname, res in rem.results.items():
+                out_dir = os.path.join(self.out_dir, subname)
+                out_bak_dir = os.path.join(self.out_dir, subname, '_bak')
+                out_scores_dir = os.path.join(self.out_dir, subname, 'scores')
+                out_auc_dir = os.path.join(self.out_dir, subname, 'auc')
+
+                os.makedirs(out_bak_dir, exist_ok=True)
+                os.makedirs(out_scores_dir, exist_ok=True)
+                os.makedirs(out_auc_dir, exist_ok=True)
+
+                pkl.dump(res, open(os.path.join(out_bak_dir, rem.name + '.p'), 'wb'))
+                pkl.dump(res.df_scores, open(os.path.join(out_scores_dir, rem.name + '.scores.tsv.gz'), 'wb'))
+                with gzip.open(os.path.join(out_auc_dir, rem.name + '.auc_data.json.gz'), 'wb') as f:
+                    f.write(str.encode(json.dumps(res.auc_data) + '\n'))
+
+                results[subname]['df_results'].append(res.df_results)
+                results[subname]['df_results_max'].append(res.df_results_max)
+                results[subname]['df_coef'].append(res.df_coef)
+                #results[subname]['df_scores'].append(res.df_scores)
+                #results[subname]['auc_data'].append(res.auc_data)
+            del rem.results
+            gc.collect()
+
+        self.results = results
 
 
     def join(self):
-        self.trainers = [p.result() for p in self.processes]
+        results = self.results
+        for subname in results:
+            df_results = pd.concat(results[subname]['df_results'], axis=1)
+            df_results_max = pd.concat(results[subname]['df_results_max'], axis=1)
+            df_coef = pd.concat(results[subname]['df_coef'], axis=0)
+            #df_scores = pd.concat(results[subname]['df_scores'], axis=0, copy=False)
+            #auc_data = {k: v for d in results[subname]['auc_data'] for k, v in d.items()}
+            #results[subname] = Results._make([df_results, df_results_max, df_coef, df_scores, auc_data])
+            results[subname] = Results._make([df_results, df_results_max, df_coef, pd.DataFrame(), {}])
+        self.results = dict(results)
+        self.write(self.results, self.out_dir)
 
+
+    @staticmethod
+    def _run(rem, args, kwargs):
+        #rem.dataset.pepfiles = [x for x in rem.dataset.pepfiles if 'W8' in x]
+        rem.dataset.load_peptides(*args, **kwargs)
+        rem.dataset.construct_datasets()
+        rem.dataset.clear_unused()
+        rem.initialize_trainers()
+        rem.start(optimize_mem_usage=True)
+        rem.join()
+
+
+    @staticmethod
+    def write(results, out_base_dir):
+        for subname, res in results.items():
+            out_dir = os.path.join(out_base_dir, subname)
+            os.makedirs(out_dir, exist_ok=True)
+    
+            out_file_results = os.path.join(out_dir, 'metrics.tsv')
+            out_file_results_max = os.path.join(out_dir, 'metrics.redmax.tsv')
+            out_file_coefficients = os.path.join(out_dir, 'coefficients.tsv')
+            #out_file_scores = os.path.join(out_dir, 'scores.tsv.gz')
+            #out_file_auc = os.path.join(out_dir, 'auc_data.json.gz')
+    
+            print('Saving %s at %s' % (out_file_results, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+            print('Saving %s at %s' % (out_file_results_max, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+            print('Saving %s at %s' % (out_file_coefficients, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+            #print('Saving %s at %s' % (out_file_scores, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+            #print('Saving %s at %s' % (out_file_auc, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+    
+            res.df_results.to_csv(out_file_results, sep='\t', float_format='%g', na_rep='nan')
+            res.df_results_max.to_csv(out_file_results_max, sep='\t', float_format='%g', na_rep='nan')
+            res.df_coef.to_csv(out_file_coefficients, sep='\t', float_format='%g', na_rep='nan')
+            #res.df_scores.to_csv(out_file_scores, sep='\t', float_format='%g', compression='gzip')
+            #with gzip.open(out_file_auc, 'wb') as f:
+            #    f.write(str.encode(json.dumps(res.auc_data) + '\n'))
+
+
+class RegressionManager(object):
+    """
+    """
+    def __init__(self, dataset, workers, executor=None):
+        self.dataset = dataset
+        self.workers = workers
+        self.executor = EnhancedProcessPoolExecutor if executor is None else executor
+
+        self.allele = list(self.dataset.alleles)[0] if len(self.dataset.alleles) == 1 else 'HLA-MinScore'
+        self.name = self.dataset.dataset_name
+
+        self.trainers = []
+
+
+    def initialize_trainers(self):
+        subgroups = defaultdict(list)
+        for i, (dat, (seed, subname)) in enumerate(zip(self.dataset.datasets, self.dataset.metadata)):
+            self.trainers.append(RegressionTrainer(dat, seed))
+            subgroups[subname].append(i)
+        self.subgroups = dict(subgroups)
+
+
+    def start(self, optimize_mem_usage=False):
+        with self.executor(max_workers=self.workers, use_threads=False) as ex:
+            for t in self.trainers:
+                t.submit(ex)
+            print(ex)
+
+        if optimize_mem_usage:
+            for t in self.trainers:
+                del t.dataset
+            del self.dataset.datasets
+            gc.collect()
+
+
+    def join(self):
+        for t in self.trainers:
+            t.join()
+
+        self.results = {}
+
+        for subname, indexes in self.subgroups.items():
+            trainers = [self.trainers[i] for i in indexes]
+            metadata = [self.dataset.metadata[i] for i in indexes]
+
+        self.results[subname] = Results._make(self._join(trainers, metadata))
+
+
+    def _join(self, trainers, metadata):
         results_dct = defaultdict(list)
         results_max_dct = defaultdict(list)
         coef_dct = defaultdict(list)
         auc_data = defaultdict(list)
-        df_scores = pd.DataFrame()
+        df_scores_list = []
 
-        allele = list(self.dataset.alleles)[0] if len(self.dataset.alleles) == 1 else 'HLA-MinScore'
-
-        for i, t in enumerate(self.trainers):
-            replicate = i+1
-
+        for t, (replicate, subname) in zip(trainers, metadata):
             for k in t.results_dct:
                 results_dct[k].append(t.results_dct[k])
             for k in t.results_max_dct:
@@ -152,82 +186,79 @@ class RegressionManager(object):
                 coef_dct[k].append(t.coef_dct[k])
             for k in t.auc_data:
                 auc_data[k].append(t.auc_data[k])
-            df_sc = t.df_scores.copy()
-            df_sc.columns = pd.Index([(x[0], allele, x[1], replicate) for x in df_sc.columns])
-            df_scores = pd.concat([df_scores, df_sc], axis=0)
+            df_sc = t.df_scores.copy().replace(np.nan, None)
+            df_sc.index = pd.Index([(self.name, self.allele, replicate, x[0], x[1])
+                for x in df_sc.index], name= ['Dataset', 'Allele', 'N'] + df_sc.index.names)
+            df_scores_list.append(df_sc)
 
         df_results = pd.DataFrame(results_dct).sort_index(axis=1)
         df_results.index = df_results.index + 1
-        df_results.columns = pd.Index([(x[0], allele, x[1]) for x in df_results.columns])
-        df_results.index = pd.Index([(self.dataset.dataset_name, x) for x in df_results.index])
+        df_results.columns = pd.Index([(self.allele, x[0], x[1]) for x in df_results.columns])
+        df_results.index = pd.Index([(self.name, x) for x in df_results.index])
+        df_results = df_results.transpose()
+        df_results.index.names = ['Allele', 'Metric', 'Regression']
 
         df_results_max = pd.DataFrame(results_dct).sort_index(axis=1)
         df_results_max.index = df_results_max.index + 1
-        df_results_max.columns = pd.Index([(x[0], allele, x[1]) for x in df_results_max.columns])
-        df_results_max.index = pd.Index([(self.dataset.dataset_name, x) for x in df_results_max.index])
+        df_results_max.columns = pd.Index([(self.allele, x[0], x[1]) for x in df_results_max.columns])
+        df_results_max.index = pd.Index([(self.name, x) for x in df_results_max.index])
+        df_results_max = df_results_max.transpose()
+        df_results_max.index.names = ['Allele', 'Metric', 'Regression']
 
-        auc_data = dict(auc_data)
+        auc_data = {self.name + ':::' + self.allele: dict(auc_data)}
 
         dct = {}
         for prefix, val_lst in coef_dct.items():
             for rep, values in enumerate(val_lst):
                 rep += 1
                 minidct = {var: val for var, val in zip(values['variable'], values['coefficient'])}
-                dct[(self.dataset.dataset_name, allele, prefix, rep)] = minidct
-        coef_df = pd.DataFrame(dct).transpose()
+                dct[(self.name, self.allele, prefix, rep)] = minidct
+        df_coef = pd.DataFrame(dct).transpose()
+        df_coef.index.names = ['Dataset', 'Allele', 'Regression', 'N']
 
-        df_scores = df_scores.sort_index(axis=1)
+        df_scores = pd.concat(df_scores_list, copy=False, axis=0).sort_index(axis=1)
 
-        self.df_results = df_results
-        self.df_results_max = df_results_max
-        self.coef_df = coef_df
-        self.auc_data = auc_data
-        self.df_scores = df_scores
-
-        self.ex.shutdown()
-
-
-    def run(self, **kwargs):
-        self.get_datasets()
-        self.initialize_trainers(**kwargs)
-        self.start()
-        self.join()
-        print('SUCCESS')
+        return df_results, df_results_max, df_coef, df_scores, auc_data
 
 
 class RegressionTrainer(object):
+    """
+    """
     def __init__(self, dataset, seed):
         """ NOTE: Cannot be re-parallelized if using MPIPoolExecutor
         """
         self.dataset = dataset
         self.seed = seed
 
-        self.dataset_name = '_name_'
-        self.allele = '_allele_'
-        self.ann_version = '_ann_version_'
-
         self.all_combinations = [
-            ["logBS"],
-            ["logTPM"],
-            ["ANNShuffleScore"],
-            ["ANNScore"],
-            ["logBS", "logTPM"],
-            ["logBS", "ANNShuffleScore"],
-            ["logBS", "ANNScore"],
-            ["logTPM", "ANNShuffleScore"],
-            ["logTPM", "ANNScore"],
-            ["logBS", "logTPM", "ANNShuffleScore"],
-            ["logBS", "logTPM", "ANNScore"]
+            ["BS"],
+            ["TPM"],
+            ["CAMAPShuff"],
+            ["CAMAP"],
+            ["BS", "TPM"],
+            ["BS", "CAMAPShuff"],
+            ["BS", "CAMAP"],
+            ["TPM", "CAMAPShuff"],
+            ["TPM", "CAMAP"],
+            ["BS", "TPM", "CAMAPShuff"],
+            ["BS", "TPM", "CAMAP"]
         ]
 
 
-    def run(self):
+    def submit(self, ex=None):
+        # expects an active executor
+        ex = EnhancedProcessPoolExecutor(max_workers=0) if ex is None else ex  # use sequential pseudo-threads
+
         df_training, df_test = self.dataset
 
-        regressions = []
+        self.regressions = []
         for x_labels in self.all_combinations:
-            p = self.train_regression(x_labels, df_training, df_test, self.seed)
-            regressions.append(p)
+            p = ex.submit(self.train_regression, x_labels, df_training, df_test, self.seed)
+            self.regressions.append(p)
+
+
+    def join(self):
+        regressions = [p.result() for p in self.regressions]
 
         results = {}
         results_max = {}
@@ -247,8 +278,6 @@ class RegressionTrainer(object):
         self.coef_dct = coef_dct
         self.auc_data = auc_data
         self.df_scores = df_scores
-
-        return self
 
 
     @staticmethod
@@ -277,12 +306,9 @@ class RegressionTrainer(object):
 
         df_scores = df_test.copy()
         df_scores = df_scores.reset_index().set_index(['Peptide', 'Class'])
-        df_scores = df_scores.drop([x for x in df_scores.columns if x != prefix], axis=1)
-        df_scores.columns = pd.MultiIndex.from_product([df_scores.columns, ['BaseScores']])
-        df_scores[(prefix, 'Scores')] = np.nan
-        df_scores[(prefix, 'Predictions')] = np.nan
-        df_scores[(prefix, 'ScoresReduced')] = np.nan
-        df_scores[(prefix, 'PredictionsReduced')] = np.nan
+        df_scores = df_scores[[x for x in df_scores.columns if x == prefix or x == prefix + 'Base']].copy()
+        df_scores = df_scores.rename({prefix: 'NormScores', prefix + 'Base': 'BaseScores'}, axis=1)
+        df_scores.columns = pd.MultiIndex.from_product([[prefix], df_scores.columns])
 
         auc_dct = {'FPR': [], 'TPR': [], 'THRESHOLDS': [], 'FPR_max': [], 'TPR_max': [], 'THRESHOLDS_max': []}
         auc_dct = {prefix: auc_dct}
@@ -293,11 +319,16 @@ class RegressionTrainer(object):
                 df_test.Class.sum() < 10 or (~df_test.Class).sum() < 10:
             print('Less than 10 members in one class. Skipping...')
 
+            df_scores[(prefix, 'Scores')] = np.nan
+            df_scores[(prefix, 'Predictions')] = False
+            df_scores[(prefix, 'ScoresReduced')] = np.nan
+            df_scores[(prefix, 'PredictionsReduced')] = False
+
         else:
             # *Train*
             X, y = df_training[x_labels], df_training.Class
             clf = LogisticRegressionCV(cv=10, random_state=seed, solver='lbfgs',
-                    multi_class='auto', class_weight='balanced', max_iter=100)
+                    multi_class='auto', class_weight='balanced', max_iter=1000)
             #clf = SVC(gamma='auto', class_weight='balanced', probability=True)
             #clf = LogisticRegression(random_state=seed, multi_class='auto', class_weight='balanced')
 
@@ -317,12 +348,6 @@ class RegressionTrainer(object):
             predictions = clf.predict(X)
             weights = abs(y - (y.sum() / y.shape[0]))
             assert np.array_equal(scores >= 0.5, predictions)
-
-            # *Adjust test DF IDs*
-            df_scores = df_test.copy()
-            df_scores = df_scores.reset_index().set_index(['Peptide', 'Class'])
-            df_scores = df_scores.drop([x for x in df_scores.columns if x != prefix], axis=1)
-            df_scores.columns = pd.MultiIndex.from_product([df_scores.columns, ['BaseScores']])
 
             # *Append to test DF*
             df_scores[(prefix, 'Scores')] = scores
@@ -409,7 +434,7 @@ class RegressionTrainer(object):
 
             # *Append to test DF*
             df_max = df_max.reset_index().set_index(['Peptide', 'Class'])
-            df_max = df_max.rename({'Scores':'ScoresReduced', 'Predictions':'PredictionsReduced'}, axis=1)
+            df_max = df_max.rename({'Scores': 'ScoresReduced', 'Predictions': 'PredictionsReduced'}, axis=1)
             df_max.columns = pd.MultiIndex.from_product([[prefix], df_max.columns])
             df_scores = df_scores.merge(df_max, on=['Peptide', 'Class'])
 

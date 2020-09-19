@@ -27,10 +27,10 @@ def available_models(target='validation-bestMin-score.pytorch', context=162, fil
             if filters is None or name in filters:
                 model_listing[name][params][n] = mf
 
-    model_listing = dict(model_listing)
     for name in model_listing.keys():
-        model_listing[name] = dict(model_listing[name])
         for k in model_listing[name]:
             model_listing[name][k] = [model_listing[name][k][v] for v in sorted(model_listing[name][k])]
+        model_listing[name] = dict(model_listing[name])
+    model_listing = dict(model_listing)
 
     return model_listing

@@ -25,7 +25,7 @@ do
     sleep 5
 done
 wait
-" | sbatch --export ALL --account $RAP_ID --workdir $PWD --time 0-12:00:00 --nodes 1 --cpus-per-task 16 --mem-per-cpu 1gb --gres gpu:1 --output $outdir/$name$exp-$date.log --error $outdir/$name$exp-$date.err --job-name $name-$exp
+" | sbatch --export ALL --account $RAP_ID --chdir $PWD --time 0-12:00:00 --nodes 1 --cpus-per-task 16 --mem-per-cpu 1gb --gres gpu:1 --output $outdir/$name$exp-$date.log --error $outdir/$name$exp-$date.err --job-name $name-$exp
 }
 
 
@@ -35,11 +35,12 @@ mkdir -p log/camap
 context=162
 epochs=500
 
-datasets="BLCL_GRCh38.98_padding162_maxBS500_maxContexts10_ratio5_peplen9@pep9t5"
-datasets=$datasets" BLCL_GRCh38.98_padding162_maxBS500_maxContexts10_ratio5_peplen9_sameTPM@pep9t5y"
-datasets=$datasets" BLCL_GRCh38.98_padding162_maxBS500_maxContexts10_ratio25_peplen9@pep9t25"
-datasets=$datasets" BLCL_GRCh38.98_padding162_maxBS500_maxContexts10_ratio25_peplen9_sameTPM@pep9t25y"
-datasets=$datasets" BLCL_GRCh38.98_padding162_maxBS500_maxContexts10_ratio5@pepallt5"
+datasets="BLCL_GRCh37.75_padding162_maxBS500_maxContexts10_ratio5_peplen9@pep9t5"
+#datasets="BLCL_GRCh38.98_padding162_maxBS500_maxContexts10_ratio5_peplen9@pep9t5"
+#datasets=$datasets" BLCL_GRCh38.98_padding162_maxBS500_maxContexts10_ratio5_peplen9_sameTPM@pep9t5y"
+#datasets=$datasets" BLCL_GRCh38.98_padding162_maxBS500_maxContexts10_ratio25_peplen9@pep9t25"
+#datasets=$datasets" BLCL_GRCh38.98_padding162_maxBS500_maxContexts10_ratio25_peplen9_sameTPM@pep9t25y"
+#datasets=$datasets" BLCL_GRCh38.98_padding162_maxBS500_maxContexts10_ratio5@pepallt5"
 
 for dsname in $datasets
 do

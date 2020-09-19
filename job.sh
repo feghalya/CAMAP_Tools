@@ -1,1 +1,1 @@
-jobs/step3_mergeNetMHC.sh
+jobs/step8_regressionThreeParam.sh

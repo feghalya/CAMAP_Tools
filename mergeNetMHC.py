@@ -2,7 +2,7 @@
 
 import argparse
 
-from camaptools.MLP import Peptides
+from camaptools.Peptides import Peptides
 
 
 def main():
