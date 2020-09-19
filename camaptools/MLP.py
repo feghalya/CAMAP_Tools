@@ -53,12 +53,12 @@ class Model(CAMAP.Classifier):
     def _get_embeds(self, sequences):
         if type(sequences) == str:
             sequences = [sequences]
-        seq_embeddings = np.empty((self.padding * 2, len(sequences)), dtype=int)
+        seq_embeddings = np.empty((len(sequences), self.padding * 2), dtype=int)
         for i, sequence in enumerate(sequences):
             if len(sequence) > self.context * 2:
                 sequence = sequence[:self.context]+sequence[-self.context:]
             sequence = self.encoding.encode(sequence)
-            seq_embeddings[:,i] = sequence
+            seq_embeddings[i,:] = sequence
         return seq_embeddings
 
     def get_seq_score_from_nt(self, sequences):
