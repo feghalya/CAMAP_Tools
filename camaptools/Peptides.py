@@ -2,7 +2,6 @@
 
 import os
 import pickle as pkl
-from concurrent.futures import ProcessPoolExecutor, as_completed
 import pandas as pd
 import shutil
 import subprocess
@@ -10,16 +9,18 @@ from collections import defaultdict
 import pkg_resources
 from datetime import datetime
 import tarfile
+import gc
 
 from camaptools.MLP import Model
 from camaptools.utils import available_models
+from camaptools.EnhancedFutures import EnhancedProcessPoolExecutor
 
 
 OUTPUT_FOLDER = "./output"
 
 
 class Peptides(object):
-    def __init__(self, genome, context=162):
+    def __init__(self, genome, context=162, workers=0, executor=None):
         self.output_folder = OUTPUT_FOLDER
         self.genome = genome
         assert 'GRCh' in genome or 'GRCm' in genome
@@ -31,6 +32,9 @@ class Peptides(object):
         # detect pickle peptide files
         pepfiles = [os.path.join(self.out_dir, f) for f in os.listdir(self.out_dir) if f[:8] == 'peptides']
         self.pepfiles = pepfiles
+
+        self.workers = workers
+        self.executor = EnhancedProcessPoolExecutor if executor is None else executor
 
 
     def load_models(self, filters=None):
@@ -50,16 +54,11 @@ class Peptides(object):
         self.models = models
 
 
-    def annotate(self, workers, executor=None, overwrite=False):
-        if executor is None:
-            executor = ProcessPoolExecutor
+    def annotate(self, overwrite=False):
         self.overwrite = overwrite
 
-        if workers:
-            with executor(max_workers=workers) as ex:
-                counts = sum(list(ex.map(self._annotate, self.pepfiles)))
-        else:
-            counts = sum(list(map(self._annotate, self.pepfiles)))
+        with self.executor(max_workers=self.workers, use_threads=True) as ex:
+            counts = sum(list(ex.map(self._annotate, self.pepfiles)))
 
         pfile = os.path.join(self.out_dir, 'info.pkl')
         info = pkl.load(open(pfile, 'rb'))
@@ -88,7 +87,6 @@ class Peptides(object):
         Assumes context size is the same for all models.
 
         """
-        import gc
         print(pfile)
         models = self.models
 
@@ -161,9 +159,7 @@ class Peptides(object):
         return counter
 
 
-    def merge_netmhc(self, workers, executor=None, overwrite=False):
-        if executor is None:
-            executor = ProcessPoolExecutor
+    def merge_netmhc(self, overwrite=False):
         self.overwrite = overwrite
         self.columns_to_keep = ['Peptide', 'nM', 'Rank']
 
@@ -190,13 +186,9 @@ class Peptides(object):
                 job_dct[pfile][1].append(os.path.join(nmpan_pred_dir, fn_allele))
 
         # Run jobs
-        if workers:
-            with executor(max_workers=workers) as ex:
-                allele_sets = ex.map(self._merge_netmhc, tuple(job_dct.keys()), *zip(*job_dct.values()))
-                exit_code = self._tar_compress(nmpan_out)  # run while peptide files are being filled
-        else:
-            allele_sets = list(map(self._merge_netmhc, tuple(job_dct.keys()), *zip(*job_dct.values())))
-            exit_code = self._tar_compress(nmpan_out)  # run after peptide files are filled
+        with self.executor(max_workers=self.workers, use_threads=False) as ex:
+            allele_sets = ex.map(self._merge_netmhc, tuple(job_dct.keys()), *zip(*job_dct.values()))
+            exit_code = self._tar_compress(nmpan_out)  # run while peptide files are being filled
 
         # Update info file
         alleles = set()

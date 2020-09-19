@@ -3,6 +3,7 @@
 import argparse
 
 from camaptools.Peptides import Peptides
+from camaptools.EnhancedFutures import EnhancedProcessPoolExecutor as EPPE, EnhancedMPIPoolExecutor as EMPE
 
 
 def main():
@@ -25,12 +26,6 @@ def main():
     mpi = args['mpi']
     overwrite = args['force']
 
-    if mpi:
-        from mpi4py.futures import MPIPoolExecutor
-        Executor = MPIPoolExecutor
-    else:
-        Executor = None # use default
-
     print('Genome:', genome)
     print('Context:', context)
     print('Filters:', filters)
@@ -38,10 +33,10 @@ def main():
     print('MPI: ', mpi)
     print('Overwrite: ', overwrite)
 
-    peptides = Peptides(genome, context=context)
+    peptides = Peptides(genome, context=context, workers=workers, executor=EMPE if mpi else EPPE)
     #peptides.pepfiles = [x for x in peptides.pepfiles if 'W8' in x]
     peptides.load_models(filters=filters)
-    peptides.annotate(workers=workers, executor=Executor, overwrite=overwrite)
+    peptides.annotate(overwrite=overwrite)
 
 
 if __name__ == '__main__':
