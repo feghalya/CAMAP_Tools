@@ -11,8 +11,7 @@ from datetime import datetime
 import tarfile
 import gc
 
-from camaptools.MLP import Model
-from camaptools.utils import available_models
+from camaptools.MLP import load_models
 from camaptools.EnhancedFutures import EnhancedProcessPoolExecutor
 
 
@@ -37,24 +36,8 @@ class Peptides(object):
         self.executor = EnhancedProcessPoolExecutor if executor is None else executor
 
 
-    def load_models(self, filters=None):
-        def load():
-            return available_models(
-                target = 'validation-bestMin-score.pytorch',
-                context = self.context,
-                filters = filters
-                )
-
-        self.model_names = {self.context: load()}
-
-        models = {self.context: load()}
-        for method, method_dct in models[self.context].items():
-            for params, model_list in method_dct.items():
-                method_dct[params] = [Model(m, self.context, 'cpu') for m in model_list]
-        self.models = models
-
-
-    def annotate(self, overwrite=False):
+    def annotate(self, overwrite=False, filters=None):
+        self.model_names, self.models = load_models(self.context, filters)
         self.overwrite = overwrite
 
         with self.executor(max_workers=self.workers, use_threads=True) as ex:

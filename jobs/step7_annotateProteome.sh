@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 name=annotate_proteome
-workers=24
+workers=50
 date=`date +%Yy%mm%dd_%Hh%Mm%Ss`
 
 function runPBS {
@@ -22,9 +22,9 @@ sacct --format=JobID%15,State,ExitCode,CPUTime,MaxRSS,Start,End --units M -j \$S
 
 
 module purge
-runPBS GRCh37.75 Adam,Adam_Shuffle
-runPBS GRCm38.78 Adam,Adam_Shuffle
 #runPBS GRCh37.75 SGD,SGD_Shuffle
 #runPBS GRCm38.78 SGD,SGD_Shuffle
+runPBS GRCh37.75 Adam,Adam_Shuffle
+runPBS GRCm38.78 Adam,Adam_Shuffle
 #runPBS GRCh38.98 Adam,Adam_Shuffle
 #runPBS GRCm38.98 Adam,Adam_Shuffle

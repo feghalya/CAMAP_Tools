@@ -80,13 +80,14 @@ class Dataset(object):
 
 
     def load_peptides(self, max_bs_or_rank=1250, var='nM', max_contexts=3,
-            step='createDS', ann_method='Adam', ann_params='pep9t5'):
+            step='createDS', ann_method='Adam', ann_params='e500pep9t5', max_replicates=None):
 
         self.max_bs_or_rank = max_bs_or_rank
-        self.max_contexts = max_contexts
+        self.max_contexts = max_contexts if not max_contexts is None else np.inf
         self.step = step
         self.ann_method = ann_method  # only applicable if step=='evaluateDS'
         self.ann_params = ann_params  # only applicable if step=='evaluateDS'
+        self.max_replicates = max_replicates
 
         if self.max_bs_or_rank < 100 and var != 'Rank' and var != 'Rank_NP':
             print('nM < 100 --> Using Rank')
@@ -137,8 +138,6 @@ class Dataset(object):
         self.pepbs = pepbs
 
         self.peptides = [pepdict_nonsource, pepdict_source]
-        self.peplist_nonsource = list(pepdict_nonsource.keys())
-        self.peplist_source = list(pepdict_source.keys())
 
 
     def _load_peptides(self, pfile):
@@ -195,7 +194,7 @@ class Dataset(object):
                                 dct = g_cont['CAMAPScore']
                                 dct = {k:dct[k] for k in dct if k.split('_')[0] == self.ann_method}
                                 for key in dct:
-                                    dct[key] = dct[key][self.context][self.ann_params]
+                                    dct[key] = dct[key][self.context][self.ann_params][:self.max_replicates]
                                 peptides[ix][(pep, i)] = dct
                             else:
                                 sys.stderr.write('ERROR: Unknown option given to step argument')
@@ -207,14 +206,16 @@ class Dataset(object):
 class TrainingDataset(Dataset):
     def split_dataset(self, ratio=5, same_tpm=False, seed=0):
         print('Splitting dataset')
-        print(len(self.peplist_source), len(self.peplist_nonsource))
+        peplist_nonsource = list(self.peptides[0].keys())
+        peplist_source = list(self.peptides[1].keys())
+        print(len(peplist_source), len(peplist_nonsource))
 
         copy_tpm_distribution = same_tpm
         #debug = False
 
         if copy_tpm_distribution:
-            ns_exp = pd.Series(np.log2(np.array([max(self.pepexpr[pep]) for pep in self.peplist_nonsource])))
-            s_exp = np.log2(np.array([max(self.pepexpr[pep]) for pep in self.peplist_source]))
+            ns_exp = pd.Series(np.log2(np.array([max(self.pepexpr[pep]) for pep in peplist_nonsource])))
+            s_exp = np.log2(np.array([max(self.pepexpr[pep]) for pep in peplist_source]))
 
             start, end = -10, 10
             l = [-np.inf] + list(range(start, end)) + [np.inf]
@@ -236,23 +237,23 @@ class TrainingDataset(Dataset):
 
             np.random.seed(seed)
             # do this to avoid `ValueError: a must be 1-dimensional` because our items are tuples
-            r = range(len(self.peplist_nonsource))
-            filtered_nonsource = np.random.choice(r, len(self.peplist_source)*ratio, False, ns_weights)
-            filtered_nonsource = [self.peplist_nonsource[i] for i in filtered_nonsource]
+            r = range(len(peplist_nonsource))
+            filtered_nonsource = np.random.choice(r, len(peplist_source)*ratio, False, ns_weights)
+            filtered_nonsource = [peplist_nonsource[i] for i in filtered_nonsource]
 
             ns_set = set(filtered_nonsource)
-            unfiltered_nonsource = [pep for pep in self.peplist_nonsource if pep not in ns_set]
+            unfiltered_nonsource = [pep for pep in peplist_nonsource if pep not in ns_set]
             keep = filtered_nonsource
-            print(len(self.peplist_source), len(filtered_nonsource), len(unfiltered_nonsource))
+            print(len(peplist_source), len(filtered_nonsource), len(unfiltered_nonsource))
 
         else:
-            ratio = len(self.peplist_source)*ratio/len(self.peplist_nonsource)
+            ratio = len(peplist_source)*ratio/len(peplist_nonsource)
             ratio = min(ratio, 1)
 
             if ratio == 1:
-                keep = self.peplist_nonsource
+                keep = peplist_nonsource
             else:
-                discard, keep = train_test_split(self.peplist_nonsource, test_size=ratio, random_state=seed)
+                discard, keep = train_test_split(peplist_nonsource, test_size=ratio, random_state=seed)
 
         dct_pep = {
             'train': [[], []],
@@ -268,7 +269,7 @@ class TrainingDataset(Dataset):
         #        nr = len(dct_pep['test'][0])/len(unfiltered_nonsource)
         #        _, dct_pep['test'][0] = train_test_split(unfiltered_nonsource, test_size=nr, random_state=seed)
 
-        dct_pep['train'][1], pre_test = train_test_split(self.peplist_source, test_size=0.4, random_state=seed)
+        dct_pep['train'][1], pre_test = train_test_split(peplist_source, test_size=0.4, random_state=seed)
         dct_pep['validation'][1], dct_pep['test'][1] = train_test_split(pre_test, test_size=0.5, random_state=seed)
 
         self.dct_pep = dct_pep
@@ -526,8 +527,6 @@ class RegressionDataset(Dataset):
         try:
             del self.pepbs
             del self.pepexpr
-            del self.peplist_nonsource
-            del self.peplist_source
             del self.peptides
             del self.df_dictionnaries
         except AttributeError:

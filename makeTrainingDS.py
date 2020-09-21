@@ -33,7 +33,7 @@ def encode_dataset(genome, ds, peplen, context_len, max_bs_or_rank, max_contexts
         dat.split_dataset(ratio=ratio, same_tpm=same_tpm, seed=seed)
         dat.encode_peptides(seed=seed)
         ds_name = '%s_%s_padding%d_maxBS%d_maxContexts%d_ratio%d_%s%sseed%d' % (
-                ds, genome, context_len, max_bs_or_rank, max_contexts,
+                ds, genome, context_len, max_bs_or_rank, max_contexts if max_contexts else 0,
                 ratio, 'peplen%s_' % peplen if peplen else '', 'sameTPM_' if same_tpm else '', seed)
         write_to_disk(dat, ds_name)
 
@@ -46,7 +46,7 @@ def main():
     parser.add_argument("-p", "--peplen", help="peptide length", type=str, default="")
     parser.add_argument("-c", "--context", help="mRNA context length on each side", type=int, default=162)
     parser.add_argument("-r", "--bs_or_rank", help="max binding score or rank (if < 25)", type=int, default=1250)
-    parser.add_argument("-m", "--ncontexts", help="max contexts permitted to keep peptide", type=int, default=3)
+    parser.add_argument("-m", "--ncontexts", help="max contexts permitted to keep peptide", type=int, default=None)
     parser.add_argument("-t", "--ratio", help="non-source to source ratio", type=int, default=5)
     parser.add_argument("-y", "--sametpm", help="sample non-source keeping TPM proportions", action='store_true')
     parser.add_argument("-s", "--nsplits", help="number of random splittings", type=int, default=1)

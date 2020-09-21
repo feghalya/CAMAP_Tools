@@ -7,6 +7,26 @@ import camap.trainer as CAMAP
 
 #from pyGeno.tools.UsefulFunctions import codonTable, AATable, synonymousCodonsFrequencies
 from camaptools.GenomeData import codonTable, AATable, synonymousCodonsFrequencies
+from camaptools.utils import available_models
+
+
+def load_models(context=162, filters=None):
+    filters = filters if type(filters) == list else [filters]
+    def load():
+        return available_models(
+            target = 'validation-bestMin-score.pytorch',
+            context = context,
+            filters = filters
+            )
+
+    model_names = {context: load()}
+
+    models = {context: load()}
+    for method, method_dct in models[context].items():
+        for params, model_list in method_dct.items():
+            method_dct[params] = [Model(m, context, 'cpu') for m in model_list]
+
+    return model_names, models
 
 
 # from ImmPred.arango.old_datasets.encodings

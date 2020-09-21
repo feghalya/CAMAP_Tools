@@ -35,8 +35,7 @@ def main():
 
     peptides = Peptides(genome, context=context, workers=workers, executor=EMPE if mpi else EPPE)
     #peptides.pepfiles = [x for x in peptides.pepfiles if 'W8' in x]
-    peptides.load_models(filters=filters)
-    peptides.annotate(overwrite=overwrite)
+    peptides.annotate(overwrite=overwrite, filters=filters)
 
 
 if __name__ == '__main__':
