@@ -1,0 +1,38 @@
+GENES
+
+rsem/B721.221_A2902/stranded/B721.221_A2902.genes.results.cDNA.TPM.tsv
+rsem/B721.221_A5101/stranded/B721.221_A5101.genes.results.cDNA.TPM.tsv
+rsem/B721.221_A5401/stranded/B721.221_A5401.genes.results.cDNA.TPM.tsv
+rsem/B721.221_A5701/stranded/B721.221_A5701.genes.results.cDNA.TPM.tsv
+
+entries: 35628
+entries expressed: 23240
+entries minval: 0.000129962
+
+mean expressed: 23240
+mean minval 99%: 0.00230094
+mean expressed 99%: 23006
+
+median expressed: 22752
+median minval 99%: 0.00322442
+median expressed 99%: 22523
+
+ISOFORMS
+
+rsem/B721.221_A2902/stranded/B721.221_A2902.isoforms.results.cDNA.TPM.tsv
+rsem/B721.221_A5101/stranded/B721.221_A5101.isoforms.results.cDNA.TPM.tsv
+rsem/B721.221_A5401/stranded/B721.221_A5401.isoforms.results.cDNA.TPM.tsv
+rsem/B721.221_A5701/stranded/B721.221_A5701.isoforms.results.cDNA.TPM.tsv
+
+entries: 171926
+entries expressed: 114915
+entries minval: 0.000100654
+
+mean expressed: 114915
+mean minval 99%: 0.0025899
+mean expressed 99%: 113693
+
+median expressed: 110772
+median minval 99%: 0.0038257
+median expressed 99%: 109612
+

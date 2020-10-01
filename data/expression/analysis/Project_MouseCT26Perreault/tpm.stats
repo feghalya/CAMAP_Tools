@@ -1,0 +1,32 @@
+GENES
+
+rsem/CT26/stranded/CT26.genes.results.cDNA.TPM.tsv
+
+entries: 36105
+entries expressed: 18494
+entries minval: 0.000269764
+
+mean expressed: 18494
+mean minval 99%: 0.00384884
+mean expressed 99%: 18310
+
+median expressed: 18494
+median minval 99%: 0.00384884
+median expressed 99%: 18310
+
+ISOFORMS
+
+rsem/CT26/stranded/CT26.isoforms.results.cDNA.TPM.tsv
+
+entries: 117530
+entries expressed: 62282
+entries minval: 0.000109228
+
+mean expressed: 62282
+mean minval 99%: 0.00515139
+mean expressed 99%: 61638
+
+median expressed: 62282
+median minval 99%: 0.00515139
+median expressed 99%: 61638
+

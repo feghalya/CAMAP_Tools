@@ -1,0 +1,36 @@
+GENES
+
+rsem/HealthyCtrl1/stranded/HealthyCtrl1.genes.results.cDNA.TPM.tsv
+rsem/HealthyCtrl2/stranded/HealthyCtrl2.genes.results.cDNA.TPM.tsv
+rsem/HealthyCtrl3/stranded/HealthyCtrl3.genes.results.cDNA.TPM.tsv
+
+entries: 35628
+entries expressed: 18969
+entries minval: 0.000417298
+
+mean expressed: 18969
+mean minval 99%: 0.0199464
+mean expressed 99%: 18780
+
+median expressed: 17436
+median minval 99%: 0.0445048
+median expressed 99%: 17262
+
+ISOFORMS
+
+rsem/HealthyCtrl1/stranded/HealthyCtrl1.isoforms.results.cDNA.TPM.tsv
+rsem/HealthyCtrl2/stranded/HealthyCtrl2.isoforms.results.cDNA.TPM.tsv
+rsem/HealthyCtrl3/stranded/HealthyCtrl3.isoforms.results.cDNA.TPM.tsv
+
+entries: 171926
+entries expressed: 87151
+entries minval: 0.000102258
+
+mean expressed: 87151
+mean minval 99%: 0.0186442
+mean expressed 99%: 86275
+
+median expressed: 71579
+median minval 99%: 0.0401894
+median expressed 99%: 70864
+

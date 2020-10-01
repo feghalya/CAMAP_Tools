@@ -1,0 +1,38 @@
+GENES
+
+rsem/BLCL_10/unstranded/BLCL_10.genes.results.cDNA.TPM.tsv
+rsem/BLCL_2.1/unstranded/BLCL_2.1.genes.results.cDNA.TPM.tsv
+rsem/BLCL_2.2/unstranded/BLCL_2.2.genes.results.cDNA.TPM.tsv
+rsem/BLCL_3/unstranded/BLCL_3.genes.results.cDNA.TPM.tsv
+
+entries: 35628
+entries expressed: 24557
+entries minval: 0.000217456
+
+mean expressed: 24557
+mean minval 99%: 0.00123045
+mean expressed 99%: 24310
+
+median expressed: 24298
+median minval 99%: 0.00211574
+median expressed 99%: 24056
+
+ISOFORMS
+
+rsem/BLCL_10/unstranded/BLCL_10.isoforms.results.cDNA.TPM.tsv
+rsem/BLCL_2.1/unstranded/BLCL_2.1.isoforms.results.cDNA.TPM.tsv
+rsem/BLCL_2.2/unstranded/BLCL_2.2.isoforms.results.cDNA.TPM.tsv
+rsem/BLCL_3/unstranded/BLCL_3.isoforms.results.cDNA.TPM.tsv
+
+entries: 171926
+entries expressed: 120258
+entries minval: 0.000100087
+
+mean expressed: 120258
+mean minval 99%: 0.00143877
+mean expressed 99%: 118967
+
+median expressed: 117482
+median minval 99%: 0.00236354
+median expressed 99%: 116235
+

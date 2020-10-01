@@ -1,0 +1,34 @@
+GENES
+
+rsem/EL4_rep1/unstranded/EL4_rep1.genes.results.cDNA.TPM.tsv
+rsem/EL4_rep2/unstranded/EL4_rep2.genes.results.cDNA.TPM.tsv
+
+entries: 36105
+entries expressed: 20436
+entries minval: 0.00057817
+
+mean expressed: 20436
+mean minval 99%: 0.00804125
+mean expressed 99%: 20232
+
+median expressed: 20436
+median minval 99%: 0.00804125
+median expressed 99%: 20232
+
+ISOFORMS
+
+rsem/EL4_rep1/unstranded/EL4_rep1.isoforms.results.cDNA.TPM.tsv
+rsem/EL4_rep2/unstranded/EL4_rep2.isoforms.results.cDNA.TPM.tsv
+
+entries: 117530
+entries expressed: 59978
+entries minval: 0.000104561
+
+mean expressed: 59978
+mean minval 99%: 0.0083232
+mean expressed 99%: 59372
+
+median expressed: 59978
+median minval 99%: 0.0083232
+median expressed 99%: 59372
+
