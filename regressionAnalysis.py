@@ -22,6 +22,7 @@ def main():
     parser.add_argument("-m", "--ncontexts", help="max contexts permitted to keep peptide", type=int, default=10)
     parser.add_argument("-a", "--ann_method", help="ANN method to use", type=str, default='SGD')
     parser.add_argument("-p", "--ann_parameters", help="ANN training parameters selection", type=str, default='e4000')
+    parser.add_argument("-x", "--max_replicates", help="ANN replicate runs to keep", type=int, default=None)
     parser.add_argument("-w", "--workers", help="number of parallel workers in addition to main", type=int, default=0)
     #parser.add_argument("-s", "--subworkers", help="number of parallel subworkers", type=int, default=0)
     parser.add_argument("--mpi", help="Parallelize using MPI", action='store_true')
@@ -37,6 +38,7 @@ def main():
     max_contexts = args['ncontexts']
     method = args['ann_method']
     params = args['ann_parameters']
+    reps = args['max_replicates']
     workers = args['workers']
     #subworkers = args['subworkers']
     mpi = args['mpi']
@@ -49,6 +51,7 @@ def main():
     print('Max contexts per peptide:', max_contexts)
     print('ANN method:', method)
     print('ANN parameters:', params)
+    print('Max CAMAP replicates:', reps)
     print('Workers:', workers)
     #print('Subworkers:', subworkers)
     print('MPI:', mpi)
@@ -85,7 +88,8 @@ def main():
             max_contexts=max_contexts,
             step='evaluateDS',
             ann_method=method,
-            ann_params=params)
+            ann_params=params,
+            max_replicates=reps)
     rem.run()
     rem.join()
 

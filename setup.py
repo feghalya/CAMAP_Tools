@@ -18,6 +18,8 @@ setup(
     packages=['camaptools'],
     install_requires=[
         'numpy==1.18.1',
+        'scikit-learn==0.22.1',
+        'parse==1.6.6'
     ],
     python_requires='>=3.5',
     classifiers=[

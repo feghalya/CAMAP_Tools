@@ -11,7 +11,7 @@ from camaptools.utils import available_models
 
 
 def load_models(context=162, filters=None):
-    filters = filters if type(filters) == list else [filters]
+    filters = filters if filters is None or type(filters) == list else [filters]
     def load():
         return available_models(
             target = 'validation-bestMin-score.pytorch',
