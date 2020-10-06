@@ -189,7 +189,9 @@ class Dataset(object):
                         if '!GA' not in g_cont['sequenceContext']:
                             pepexpr[(pep, i)] = exp
                             if self.step == 'createDS':
-                                peptides[ix][(pep, i)] = g_cont
+                                peptides[ix][(pep, i)] = {k: v for k, v in g_cont.items() if k != 'CAMAPScore'}
+                                peptides[ix][(pep, i)]['expressedTranscripts'] = transcripts
+                                peptides[ix][(pep, i)]['expressedTranscriptsExpression'] = exp
                             elif self.step == 'evaluateDS':
                                 dct = g_cont['CAMAPScore']
                                 dct = {k:dct[k] for k in dct if k.split('_')[0] == self.ann_method}
@@ -214,8 +216,8 @@ class TrainingDataset(Dataset):
         #debug = False
 
         if copy_tpm_distribution:
-            ns_exp = pd.Series(np.log2(np.array([max(self.pepexpr[pep]) for pep in peplist_nonsource])))
-            s_exp = np.log2(np.array([max(self.pepexpr[pep]) for pep in peplist_source]))
+            ns_exp = pd.Series(np.log2(np.array([np.mean(self.pepexpr[pep]) for pep in peplist_nonsource])))
+            s_exp = np.log2(np.array([np.mean(self.pepexpr[pep]) for pep in peplist_source]))
 
             start, end = -10, 10
             l = [-np.inf] + list(range(start, end)) + [np.inf]

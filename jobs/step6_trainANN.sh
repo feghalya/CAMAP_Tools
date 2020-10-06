@@ -33,11 +33,11 @@ module purge
 mkdir -p log/camap
 
 context=162
-epochs=500
+epochs=4000
 
 datasets=
-#datasets=$datasets" BLCL_GRCh37.75_padding162_maxBS500_maxContexts10_ratio5_peplen9@pep9t5"
-datasets=$datasets" BLCL_GRCh37.75_padding162_maxBS500_maxContexts10_ratio5_peplen9_sameTPM@pep9t5y"
+datasets=$datasets" BLCL_GRCh37.75_padding162_maxBS500_maxContexts10_ratio5_peplen9@pep9t5"
+#datasets=$datasets" BLCL_GRCh37.75_padding162_maxBS500_maxContexts10_ratio5_peplen9_sameTPM@pep9t5y"
 datasets=$datasets" BLCL_GRCh37.75_padding162_maxBS500_maxContexts3_ratio5_peplen9@pep9t5m3"
 datasets=$datasets" BLCL_GRCh37.75_padding162_maxBS500_maxContexts0_ratio5_peplen9@pep9t5mINF"
 #datasets=$datasets" BLCL_GRCh38.98_padding162_maxBS500_maxContexts10_ratio5_peplen9@pep9t5"
@@ -54,14 +54,14 @@ do
     for exp in 1 4 7 10
     do
         name="p${context}e${epochs}${dsshortname}"
-        run="camap $context -e $epochs -n $name -w 5 -o adam --device cuda -subf pytorch-adam"
-        runPBS "$name-adam" "$exp" "$dsname" "$run"
+        run="camap $context -e $epochs -n $name -w 5 -o sgd --device cuda -subf pytorch-sgd"
+        runPBS "$name-sgd" "$exp" "$dsname" "$run"
     done
 
     for exp in 1 4 7 10
     do
         name="p${context}e${epochs}${dsshortname}"
-        run="camap ${context} -cse -e $epochs -n $name -w 5 -o adam --device cuda -subf pytorch-adam-shuffle"
-        runPBS "$name-adam-shuffle" "$exp" "$dsname" "$run"
+        run="camap ${context} -cse -e $epochs -n $name -w 5 -o sgd --device cuda -subf pytorch-sgd-shuffle"
+        runPBS "$name-sgd-shuffle" "$exp" "$dsname" "$run"
     done
 done

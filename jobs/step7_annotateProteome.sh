@@ -22,6 +22,8 @@ sacct --format=JobID%15,State,ExitCode,CPUTime,MaxRSS,Start,End --units M -j \$S
 
 
 module purge
+mkdir -p log
+
 #runPBS GRCh37.75 SGD,SGD_Shuffle
 #runPBS GRCm38.78 SGD,SGD_Shuffle
 runPBS GRCh37.75 Adam,Adam_Shuffle
