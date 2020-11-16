@@ -12,6 +12,7 @@ import pickle as pkl
 import gzip
 import json
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
 
 from camaptools.EnhancedFutures import EnhancedProcessPoolExecutor, EnhancedMPIPoolExecutor
 
@@ -24,7 +25,7 @@ Results = namedtuple('Results', ['df_results', 'df_results_max', 'df_coef', 'df_
 class RegressionMetaManager(object):
     """A wrapper around RegressionManagers that also takes care of running and distributing jobs for Datasets
     """
-    def __init__(self, datasets, out_dir, workers, executor=None):
+    def __init__(self, datasets, out_dir, workers=0, executor=None):
         self.out_dir = out_dir
         self.workers = workers
         self.executor = EnhancedProcessPoolExecutor if executor is None else executor
@@ -41,34 +42,15 @@ class RegressionMetaManager(object):
 
 
     def run(self):
-        results = defaultdict(lambda: defaultdict(list))
+        tex = ThreadPoolExecutor(max_workers=1)
+        future = tex.submit(lambda: defaultdict(lambda: defaultdict(list)))
         for rem in self.managers:
             print(rem.name)
             self._run(rem, self.load_peptides_args, self.load_peptides_kwargs)
-            for subname, res in rem.results.items():
-                out_dir = os.path.join(self.out_dir, subname)
-                out_bak_dir = os.path.join(self.out_dir, subname, '_bak')
-                out_scores_dir = os.path.join(self.out_dir, subname, 'scores')
-                out_auc_dir = os.path.join(self.out_dir, subname, 'auc')
-
-                os.makedirs(out_bak_dir, exist_ok=True)
-                os.makedirs(out_scores_dir, exist_ok=True)
-                os.makedirs(out_auc_dir, exist_ok=True)
-
-                pkl.dump(res, open(os.path.join(out_bak_dir, rem.name + '.p'), 'wb'))
-                pkl.dump(res.df_scores, open(os.path.join(out_scores_dir, rem.name + '.scores.tsv.gz'), 'wb'))
-                with gzip.open(os.path.join(out_auc_dir, rem.name + '.auc_data.json.gz'), 'wb') as f:
-                    f.write(str.encode(json.dumps(res.auc_data) + '\n'))
-
-                results[subname]['df_results'].append(res.df_results)
-                results[subname]['df_results_max'].append(res.df_results_max)
-                results[subname]['df_coef'].append(res.df_coef)
-                #results[subname]['df_scores'].append(res.df_scores)
-                #results[subname]['auc_data'].append(res.auc_data)
-            del rem.results
-            gc.collect()
-
-        self.results = results
+            self.results = future.result()
+            future = tex.submit(self._save, rem, self.results, self.out_dir)
+        self.results = future.result()
+        tex.shutdown()
 
 
     def join(self):
@@ -77,9 +59,6 @@ class RegressionMetaManager(object):
             df_results = pd.concat(results[subname]['df_results'], axis=1)
             df_results_max = pd.concat(results[subname]['df_results_max'], axis=1)
             df_coef = pd.concat(results[subname]['df_coef'], axis=0)
-            #df_scores = pd.concat(results[subname]['df_scores'], axis=0, copy=False)
-            #auc_data = {k: v for d in results[subname]['auc_data'] for k, v in d.items()}
-            #results[subname] = Results._make([df_results, df_results_max, df_coef, df_scores, auc_data])
             results[subname] = Results._make([df_results, df_results_max, df_coef, pd.DataFrame(), {}])
         self.results = dict(results)
         self.write(self.results, self.out_dir)
@@ -87,7 +66,7 @@ class RegressionMetaManager(object):
 
     @staticmethod
     def _run(rem, args, kwargs):
-        #rem.dataset.pepfiles = [x for x in rem.dataset.pepfiles if 'W8' in x]
+        #rem.dataset.pepfiles = [x for x in rem.dataset.pepfiles if 'W' in x]
         rem.dataset.load_peptides(*args, **kwargs)
         rem.dataset.construct_datasets()
         rem.dataset.clear_unused()
@@ -97,35 +76,61 @@ class RegressionMetaManager(object):
 
 
     @staticmethod
+    def _save(rem, results, out_sub_dir):
+        for subname in list(rem.results.keys()):
+            res = rem.results[subname]
+            out_dir = os.path.join(out_sub_dir, subname)
+            out_bak_dir = os.path.join(out_sub_dir, subname, '_bak')
+            out_scores_dir = os.path.join(out_sub_dir, subname, 'scores')
+            out_auc_dir = os.path.join(out_sub_dir, subname, 'auc')
+
+            os.makedirs(out_bak_dir, exist_ok=True)
+            os.makedirs(out_scores_dir, exist_ok=True)
+            os.makedirs(out_auc_dir, exist_ok=True)
+
+            res.df_results.to_csv(os.path.join(out_bak_dir, rem.name + '.results.tsv'),
+                    sep='\t', float_format='%g')
+            res.df_results_max.to_csv(os.path.join(out_bak_dir, rem.name + '.results.max.tsv'),
+                    sep='\t', float_format='%g')
+            res.df_coef.to_csv(os.path.join(out_bak_dir, rem.name + '.coefficients.tsv'),
+                    sep='\t', float_format='%g')
+            res.df_scores.to_csv(os.path.join(out_scores_dir, rem.name + '.scores.tsv.gz'),
+                    sep='\t', float_format='%g', compression='gzip')
+            with gzip.open(os.path.join(out_auc_dir, rem.name + '.auc_data.json.gz'), 'wb') as f:
+                f.write(str.encode(json.dumps(res.auc_data) + '\n'))
+
+            results[subname]['df_results'].append(res.df_results)
+            results[subname]['df_results_max'].append(res.df_results_max)
+            results[subname]['df_coef'].append(res.df_coef)
+            del res
+            del rem.results[subname]
+            gc.collect()
+        return results
+
+
+    @staticmethod
     def write(results, out_base_dir):
         for subname, res in results.items():
             out_dir = os.path.join(out_base_dir, subname)
             os.makedirs(out_dir, exist_ok=True)
-    
+
             out_file_results = os.path.join(out_dir, 'metrics.tsv')
             out_file_results_max = os.path.join(out_dir, 'metrics.redmax.tsv')
             out_file_coefficients = os.path.join(out_dir, 'coefficients.tsv')
-            #out_file_scores = os.path.join(out_dir, 'scores.tsv.gz')
-            #out_file_auc = os.path.join(out_dir, 'auc_data.json.gz')
-    
+
             print('Saving %s at %s' % (out_file_results, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
             print('Saving %s at %s' % (out_file_results_max, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
             print('Saving %s at %s' % (out_file_coefficients, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-            #print('Saving %s at %s' % (out_file_scores, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-            #print('Saving %s at %s' % (out_file_auc, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-    
+
             res.df_results.to_csv(out_file_results, sep='\t', float_format='%g', na_rep='nan')
             res.df_results_max.to_csv(out_file_results_max, sep='\t', float_format='%g', na_rep='nan')
             res.df_coef.to_csv(out_file_coefficients, sep='\t', float_format='%g', na_rep='nan')
-            #res.df_scores.to_csv(out_file_scores, sep='\t', float_format='%g', compression='gzip')
-            #with gzip.open(out_file_auc, 'wb') as f:
-            #    f.write(str.encode(json.dumps(res.auc_data) + '\n'))
 
 
 class RegressionManager(object):
     """
     """
-    def __init__(self, dataset, workers, executor=None):
+    def __init__(self, dataset, workers=0, executor=None):
         self.dataset = dataset
         self.workers = workers
         self.executor = EnhancedProcessPoolExecutor if executor is None else executor
@@ -133,10 +138,9 @@ class RegressionManager(object):
         self.allele = list(self.dataset.alleles)[0] if len(self.dataset.alleles) == 1 else 'HLA-MinScore'
         self.name = self.dataset.dataset_name
 
-        self.trainers = []
-
 
     def initialize_trainers(self):
+        self.trainers = []
         subgroups = defaultdict(list)
         for i, (dat, (seed, subname)) in enumerate(zip(self.dataset.datasets, self.dataset.metadata)):
             self.trainers.append(RegressionTrainer(dat, seed))
@@ -198,7 +202,7 @@ class RegressionManager(object):
         df_results = df_results.transpose()
         df_results.index.names = ['Allele', 'Metric', 'Regression']
 
-        df_results_max = pd.DataFrame(results_dct).sort_index(axis=1)
+        df_results_max = pd.DataFrame(results_max_dct).sort_index(axis=1)
         df_results_max.index = df_results_max.index + 1
         df_results_max.columns = pd.Index([(self.allele, x[0], x[1]) for x in df_results_max.columns])
         df_results_max.index = pd.Index([(self.name, x) for x in df_results_max.index])
@@ -224,9 +228,13 @@ class RegressionManager(object):
 class RegressionTrainer(object):
     """
     """
-    def __init__(self, dataset, seed):
-        """ NOTE: Cannot be re-parallelized if using MPIPoolExecutor
+    def __init__(self, dataset, seed, workers=0, executor=None):
+        """ NOTE: Cannot fork if using MPIPoolExecutor (must use workers=0)
         """
+        self.workers = workers
+        # careful not to parallelize too much, as LogisticRegression spawns its own processes with all available CPUs
+        self.executor = EnhancedProcessPoolExecutor if executor is None else executor
+
         self.dataset = dataset
         self.seed = seed
 
@@ -252,13 +260,27 @@ class RegressionTrainer(object):
         df_training, df_test = self.dataset
 
         self.regressions = []
-        for x_labels in self.all_combinations:
-            p = ex.submit(self.train_regression, x_labels, df_training, df_test, self.seed)
+        w = self.workers + 1
+        sub_x_labels_groups = [self.all_combinations[n:n+w] for n in range(0, len(self.all_combinations), w)]
+        for sub_x_labels in sub_x_labels_groups:
+            p = ex.submit(self._submit, sub_x_labels, df_training, df_test, self.seed, self.executor)
             self.regressions.append(p)
 
 
+    @classmethod
+    def _submit(cls, sub_x_labels, df_training, df_test, seed, executor):
+        workers = len(sub_x_labels) - 1
+        sub_regressions = []
+        with executor(max_workers=workers, use_threads=True) as sex:  # secondary ex
+            for x_labels in sub_x_labels:
+                p = sex.submit(cls.train_regression, x_labels, df_training, df_test, seed)
+                sub_regressions.append(p)
+            print(sex)
+        return [p.result() for p in sub_regressions]
+
+
     def join(self):
-        regressions = [p.result() for p in self.regressions]
+        regressions = [res for p in self.regressions for res in p.result()]
 
         results = {}
         results_max = {}

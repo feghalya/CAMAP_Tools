@@ -18,7 +18,7 @@ def main():
     #parser.add_argument("-d", "--dataset", help="dataset [BLCL, EL4, etc.]", type=str, default="BLCL")
     parser.add_argument("-c", "--context", help="mRNA context length on each side", type=int, default=162)
     parser.add_argument("-r", "--bs_or_rank", help="max binding score (>=100) or rank (<100)", type=int, default=1250)
-    parser.add_argument("-n", "--np", help="use rank score from naturally processed peptudes", action='store_true')
+    parser.add_argument("-n", "--np", help="use rank score from naturally processed peptides", action='store_true')
     parser.add_argument("-m", "--ncontexts", help="max contexts permitted to keep peptide", type=int, default=10)
     parser.add_argument("-a", "--ann_method", help="ANN method to use", type=str, default='SGD')
     parser.add_argument("-p", "--ann_parameters", help="ANN training parameters selection", type=str, default='e4000')
