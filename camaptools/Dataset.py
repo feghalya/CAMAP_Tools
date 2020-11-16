@@ -10,6 +10,7 @@ import random
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
 import gc
+import sys
 
 from camaptools.GenomeData import AATable, synonymousCodonsFrequencies
 from camaptools.MLP import CodonEmbeddings
@@ -181,17 +182,19 @@ class Dataset(object):
                                 #          but also not non-source, which are discarded anyway and never
                                 #          appear in the negative dataset
                                 tr_is_source[t] = tr_is_source[t] or (pep in self.detected_peptides)
-                if len(contexts) <= self.max_contexts:
+                if len(contexts) and len(contexts) <= self.max_contexts:
                     peptr[pep] = tr_set
                     pepbs[pep] = 1 - np.log(bs_or_rank) / np.log(50000) if self.var == 'nM' else bs_or_rank
                     for i, (g_cont, tr) in enumerate(zip(contexts, transcripts)):
                         exp = [self.tpm_dct[t] for t in tr]
                         if '!GA' not in g_cont['sequenceContext']:
-                            pepexpr[(pep, i)] = exp
+                            pepexpr[(pep, i)] = (exp, tr)
                             if self.step == 'createDS':
                                 peptides[ix][(pep, i)] = {k: v for k, v in g_cont.items() if k != 'CAMAPScore'}
-                                peptides[ix][(pep, i)]['expressedTranscripts'] = transcripts
+                                peptides[ix][(pep, i)]['expressedTranscripts'] = tr
                                 peptides[ix][(pep, i)]['expressedTranscriptsExpression'] = exp
+                                peptides[ix][(pep, i)]['bindingAffinity'] = pepbs[pep]
+                                peptides[ix][(pep, i)]['bindingAffinityMetric'] = self.var
                             elif self.step == 'evaluateDS':
                                 dct = g_cont['CAMAPScore']
                                 dct = {k:dct[k] for k in dct if k.split('_')[0] == self.ann_method}
@@ -205,21 +208,42 @@ class Dataset(object):
         return peptides[0], peptides[1], tr_is_source, peptr, pepexpr, pepbs
 
 
+    def clear_unused(self):
+        print('Clearing unused data')
+        try:
+            del self.pepbs
+            del self.pepexpr
+            del self.peptides
+        except AttributeError:
+            print("Some attributes were not cleared because they didn't exist")
+        gc.collect()
+
+
 class TrainingDataset(Dataset):
-    def split_dataset(self, ratio=5, same_tpm=False, seed=0):
+    def split_dataset(self, ratio=5, same_tpm=False, same_bs=False, seed=0):
         print('Splitting dataset')
+        assert sum([same_tpm, same_bs]) < 2
+        copy_distribution = same_tpm or same_bs if not ratio is None else False
+        #debug = False
+        ratio = ratio if not ratio is None else np.inf
+
         peplist_nonsource = list(self.peptides[0].keys())
         peplist_source = list(self.peptides[1].keys())
         print(len(peplist_source), len(peplist_nonsource))
 
-        copy_tpm_distribution = same_tpm
-        #debug = False
-
-        if copy_tpm_distribution:
-            ns_exp = pd.Series(np.log2(np.array([np.mean(self.pepexpr[pep]) for pep in peplist_nonsource])))
-            s_exp = np.log2(np.array([np.mean(self.pepexpr[pep]) for pep in peplist_source]))
+        if copy_distribution:
+            if same_tpm:
+                ns_exp = pd.Series(np.log2(np.array([np.mean(self.pepexpr[pep][0]) for pep in peplist_nonsource])))
+                s_exp = np.log2(np.array([np.mean(self.pepexpr[pep][0]) for pep in peplist_source]))
+            elif same_bs:
+                ns_exp = pd.Series(np.array([self.pepbs[pep[0]] for pep in peplist_nonsource]))
+                s_exp = np.array([self.pepbs[pep[0]] for pep in peplist_source])
+                max_val = max(max(ns_exp), max(s_exp))
+                ns_exp = ns_exp/max_val*30-15
+                s_exp = s_exp/max_val*30-15
 
             start, end = -10, 10
+
             l = [-np.inf] + list(range(start, end)) + [np.inf]
             bins = []
             try:
@@ -267,7 +291,7 @@ class TrainingDataset(Dataset):
         dct_pep['validation'][0], dct_pep['test'][0] = train_test_split(pre_test, test_size=0.5, random_state=seed)
 
         #if debug:
-        #    if copy_tpm_distribution:
+        #    if copy_distribution:
         #        nr = len(dct_pep['test'][0])/len(unfiltered_nonsource)
         #        _, dct_pep['test'][0] = train_test_split(unfiltered_nonsource, test_size=nr, random_state=seed)
 
@@ -414,7 +438,7 @@ class RegressionDataset(Dataset):
 
             for pep in self.peptides[sns]:
                 p = pep[0]
-                expressions = self.pepexpr[pep]
+                expressions = self.pepexpr[pep][0]
                 bs_score = self.pepbs[p]
                 ann_score = self.peptides[sns][pep][self.ann_method]
                 ann_shuf_score = self.peptides[sns][pep][self.ann_method + '_Shuffle']
@@ -525,13 +549,9 @@ class RegressionDataset(Dataset):
 
 
     def clear_unused(self):
-        print('Clearing unused data')
+        super().clear_unused()
         try:
-            del self.pepbs
-            del self.pepexpr
-            del self.peptides
             del self.df_dictionnaries
         except AttributeError:
             print("Some attributes were not cleared because they didn't exist")
-
         gc.collect()
