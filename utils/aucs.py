@@ -5,6 +5,7 @@ import gzip
 from sklearn import metrics
 import pandas as pd
 import sys
+import os
 from concurrent.futures import ProcessPoolExecutor
 
 from camaptools.MLP import Model, load_models
@@ -40,9 +41,11 @@ def calc_auc(seed, homology=10, copy='', shuffle='', dataset='BLCL'):
     m = MODELS[1][162]['SGD']['e4000pep9t5%s%s' % (suffix, suffix_2)][seed]
 
     if dataset == 'BLCL':
-        dsname = 'BLCL_GRCh37.75_padding162_maxBS500%s%d_ratio5_peplen9%s%s%d_encoding-%s.pkl.gz' % (
-                '_maxContexts', ncont, copy_dist, '_seed', seed+1, 'Codon' + shuffle + 'Embeddings')
-        p = pkl.load(gzip.open('../output/trainDS/%s' % dsname), 'rb'))
+        dsname = '%s_%s_padding162_maxBS500%s%d_ratio5_peplen9%s%s%d_encoding-%s.pkl.gz' % (
+            'BLCL', 'GRCh37.75', '_maxContexts', ncont,
+            copy_dist, '_seed', seed+1, 'Codon' + shuffle + 'Embeddings'
+        )
+        p = pkl.load(gzip.open('../output/trainDS/%s' % dsname, 'rb'))
         labels = [0]*len(p['test'][0]) + [1]*len(p['test'][1])
         scores = m.get_score(p['test'][0] + p['test'][1])[:,1].tolist()
         test_size = len(p['test'][1])
@@ -54,8 +57,9 @@ def calc_auc(seed, homology=10, copy='', shuffle='', dataset='BLCL'):
         else:
             species = 'GRCh37.75'
         dsname = '%s_%s_padding162_maxBS500_maxContexts0_ratio0%s%d_encoding-%s.pkl.gz' % (
-                dataset, species, '_seed', seed+1, 'Codon' + shuffle + 'Embeddings')
-        p = pkl.load(gzip.open('../output/trainDS/%s' % dsname), 'rb'))
+            dataset, species, '_seed', seed+1, 'Codon' + shuffle + 'Embeddings'
+        )
+        p = pkl.load(gzip.open('../output/trainDS/%s' % dsname, 'rb'))
         ns = p['train'][0] + p['validation'][0] + p['test'][0]
         s = p['train'][1] + p['validation'][1] + p['test'][1]
         labels = [0]*len(ns) + [1]*len(s)
@@ -70,26 +74,32 @@ def calc_auc(seed, homology=10, copy='', shuffle='', dataset='BLCL'):
     return auc, test_size, train_size, validation_size
 
 
-def res(l):
-    return tuple(zip(*[f.result() for f in l]))
-
-
-def run(dataset):
+def run(dat):
     with ProcessPoolExecutor() as ex:
-        c10 = [ex.submit(calc_auc, seed, 10, dataset=dataset) for seed in range(12)]
-        c10s = [ex.submit(calc_auc, seed, 10, '', 'Shuffle', dataset=dataset) for seed in range(12)]
+        hom = 10
+        copy = ''
+        c10 = [ex.submit(calc_auc, seed, hom, copy, '', dat) for seed in range(12)]
+        c10s = [ex.submit(calc_auc, seed, hom, copy, 'Shuffle', dat) for seed in range(12)]
 
-        c3 = [ex.submit(calc_auc, seed, 3, dataset=dataset) for seed in range(12)]
-        c3s = [ex.submit(calc_auc, seed, 3, '', 'Shuffle', dataset=dataset) for seed in range(12)]
+        hom = 3
+        copy = ''
+        c3 = [ex.submit(calc_auc, seed, hom, copy, '', dat) for seed in range(12)]
+        c3s = [ex.submit(calc_auc, seed, hom, copy, 'Shuffle', dat) for seed in range(12)]
 
-        c0 = [ex.submit(calc_auc, seed, 0, dataset=dataset) for seed in range(12)]
-        c0s = [ex.submit(calc_auc, seed, 0, '', 'Shuffle', dataset=dataset) for seed in range(12)]
+        hom = 0
+        copy = ''
+        c0 = [ex.submit(calc_auc, seed, hom, copy, '', dat) for seed in range(12)]
+        c0s = [ex.submit(calc_auc, seed, hom, copy, 'Shuffle', dat) for seed in range(12)]
 
-        samebs = [ex.submit(calc_auc, seed, 10, 'BS', '', dataset=dataset) for seed in range(12)]
-        samebs_s = [ex.submit(calc_auc, seed, 10, 'BS', 'Shuffle', dataset=dataset) for seed in range(12)]
+        hom = 10
+        copy = 'BS'
+        samebs = [ex.submit(calc_auc, seed, hom, copy, '', dat) for seed in range(12)]
+        samebs_s = [ex.submit(calc_auc, seed, hom, copy, 'Shuffle', dat) for seed in range(12)]
 
-        sametpm = [ex.submit(calc_auc, seed, 10, 'TPM', '', dataset=dataset) for seed in range(12)]
-        sametpm_s = [ex.submit(calc_auc, seed, 10, 'TPM', 'Shuffle', dataset=dataset) for seed in range(12)]
+        hom = 10
+        copy = 'TPM'
+        sametpm = [ex.submit(calc_auc, seed, hom, copy, '', dat) for seed in range(12)]
+        sametpm_s = [ex.submit(calc_auc, seed, hom, copy, 'Shuffle', dat) for seed in range(12)]
 
     # ** Homology **
 
@@ -98,7 +108,9 @@ def run(dataset):
     seeds = [x+1 for x in range(12)]*6
 
     outputs = [c3, c10, c0, c3s, c10s, c0s]
-    aucs, test_sizes, train_sizes, validation_sizes = tuple(zip(*[res(x) for x in outputs]))
+    results = [[f.result() for f in x] for x in outputs]
+    results = [tuple(zip(*x)) for x in results]
+    aucs, test_sizes, train_sizes, validation_sizes = tuple(zip(*results))
     aucs = [y for x in aucs for y in x]
     test_sizes = [y for x in test_sizes for y in x]
     train_sizes = [y for x in train_sizes for y in x]
@@ -112,7 +124,7 @@ def run(dataset):
         "TrainSize": train_sizes,
         "ValidationSize": validation_sizes
         }).set_index('Label')
-    df_homology['Dataset'] = dataset
+    df_homology['Dataset'] = dat
 
     # ** Binning **
 
@@ -121,7 +133,9 @@ def run(dataset):
     seeds = [x+1 for x in range(12)]*6
 
     outputs = [c10, sametpm, samebs, c10s, sametpm_s, samebs_s]
-    aucs, test_sizes, train_sizes, validation_sizes = tuple(zip(*[res(x) for x in outputs]))
+    results = [[f.result() for f in x] for x in outputs]
+    results = [tuple(zip(*x)) for x in results]
+    aucs, test_sizes, train_sizes, validation_sizes = tuple(zip(*results))
     aucs = [y for x in aucs for y in x]
     test_sizes = [y for x in test_sizes for y in x]
     train_sizes = [y for x in train_sizes for y in x]
@@ -135,7 +149,7 @@ def run(dataset):
         "TrainSize": train_sizes,
         "ValidationSize": validation_sizes
         }).set_index('Label')
-    df_binning['Dataset'] = dataset
+    df_binning['Dataset'] = dat
 
     return df_homology, df_binning
 
@@ -150,6 +164,8 @@ for dataset in ['BLCL', 'B721', 'PBMCs', 'EL4', 'CT26']:
 
 homologies = pd.concat(homologies, axis=0)
 binnings = pd.concat(binnings, axis=0)
+
+os.makedirs('revisions', exist_ok=True)
 
 homologies[homologies.Dataset == 'BLCL'].to_csv('revisions/homology.tsv', sep='\t', float_format='%g')
 #^ only compare original vs shuffle

@@ -13,9 +13,7 @@ import gc
 
 from camaptools.MLP import load_models
 from camaptools.EnhancedFutures import EnhancedProcessPoolExecutor
-
-
-OUTPUT_FOLDER = "./output"
+from camaptools.utils import OUTPUT_FOLDER
 
 
 class Peptides(object):

@@ -15,9 +15,7 @@ import sys
 from camaptools.GenomeData import AATable, synonymousCodonsFrequencies
 from camaptools.MLP import CodonEmbeddings
 from camaptools.EnhancedFutures import EnhancedProcessPoolExecutor, EnhancedMPIPoolExecutor, as_completed
-
-
-OUTPUT_FOLDER = "./output"
+from camaptools.utils import ROOT, OUTPUT_FOLDER
 
 
 class Dataset(object):
@@ -41,7 +39,7 @@ class Dataset(object):
 
         # calculate synonymous codon frequencies
         try:
-            with open('output/codonCounts/%s.tsv' % self.genome, 'r') as f:
+            with open(os.path.join(self.output_folder, 'codonCounts/%s.tsv' % self.genome), 'r') as f:
                 codons = dict([s.strip().split('\t') for s in f])
             synonymousCodonsFrequencies = dict.fromkeys(AATable)
             for aa, cods in AATable.items():
@@ -49,12 +47,12 @@ class Dataset(object):
                 counts = [c/sum(counts) for c in counts]
                 synonymousCodonsFrequencies[aa] = {c:ct for c, ct in zip(cods, counts)}
         except FileNotFoundError:
-            print('output/codonCounts/%s.tsv not found, loading from pyGeno' % self.genome)
+            print(os.path.join(self.output_folder, 'codonCounts/%s.tsv' % self.genome) + ' not found, loading from pyGeno')
             from pyGeno.tools.UsefulFunctions import synonymousCodonsFrequencies
 
         self.encoding = CodonEmbeddings(synonymousCodonsFrequencies)
 
-        dr = 'data/alleles'
+        dr = os.path.join(ROOT, 'data/alleles')
         fn = self.species + '.tsv'
         alleles_df = pd.read_csv(os.path.join(dr, fn), sep='\t', index_col=0)
         colname = [x for x in alleles_df.columns if self.species+self.cellline in x]
@@ -62,7 +60,7 @@ class Dataset(object):
         colname = colname[0]
         self.alleles = set(alleles_df[alleles_df[colname] == 1].index)
 
-        dr = 'data/peptides'
+        dr = os.path.join(ROOT, 'data/peptides')
         fn = 'detected.peptides.' + self.species + cellline
         massspec_file = [os.path.join(dr, f) for f in os.listdir(dr) if fn in f]
         assert len(massspec_file) == 1
@@ -70,7 +68,7 @@ class Dataset(object):
         with open(massspec_file, 'r') as f:
             self.detected_peptides = set([l.strip() for l in f.readlines()])
 
-        dr = 'data/expression'
+        dr = os.path.join(ROOT, 'data/expression')
         fn = 'isoforms.median.tpm.99p.' + self.species + cellline
         expression_file = [os.path.join(dr, f) for f in os.listdir(dr) if fn in f]
         assert len(expression_file) == 1

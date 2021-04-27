@@ -5,7 +5,8 @@ from collections import defaultdict
 from glob import glob
 from parse import parse
 
-OUTPUT_FOLDER = "./output"
+ROOT = '/'.join(os.path.realpath(__file__).split('/')[:-2])
+OUTPUT_FOLDER = os.path.join(ROOT, "output")
 
 def available_models(target='validation-bestMin-score.pytorch', context=162, filters=None):
     out_dir = OUTPUT_FOLDER
