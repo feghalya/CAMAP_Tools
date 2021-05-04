@@ -4,9 +4,13 @@ import os
 from collections import defaultdict
 from glob import glob
 from parse import parse
+#import camaptools
 
+
+#ROOT = camaptools.__file__.rsplit('/', 2)[0]
 ROOT = '/'.join(os.path.realpath(__file__).split('/')[:-2])
 OUTPUT_FOLDER = os.path.join(ROOT, "output")
+
 
 def available_models(target='validation-bestMin-score.pytorch', context=162, algorithms=None, parameters=None):
     out_dir = OUTPUT_FOLDER
@@ -23,7 +27,8 @@ def available_models(target='validation-bestMin-score.pytorch', context=162, alg
         c = int(dct['context'])
 
         name = m.split('_')[0].replace('sgd', 'SGD').replace('adam', 'Adam').replace('adagrad',
-            'Adagrad').replace('shuffle', 'Shuffle').replace('mask', 'Mask').replace('-', '_')
+            'Adagrad').replace('shuffle', 'Shuffle').replace('aminoacid',
+            'AminoAcid').replace('mask', 'Mask').replace('-', '_')
 
         if context == c:
             if algorithms is None or name in algorithms:

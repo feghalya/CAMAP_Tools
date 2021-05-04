@@ -33,7 +33,7 @@ def load_models(context=162, algorithms=None, parameters=None):
 
 # from ImmPred.arango.old_datasets.encodings
 class CodonEmbeddings(object):
-    def __init__(self, synonymousCodonsFrequencies=synonymousCodonsFrequencies):
+    def __init__(self):
         self.encoding = {}
         self.encodingLst = ['000']
         codonKeys = list(codonTable.keys())
@@ -43,23 +43,56 @@ class CodonEmbeddings(object):
             self.encoding[c] = i + 1
             self.encodingLst.append(c)
 
+    def encode(self, seq):
+        assert len(seq)%3 == 0
+        X = []
+        for c in range(0, len(seq), 3):
+            codon = seq[c:c+3]
+            X.append(self.encoding[codon])
+        return X
+
+
+class CodonShuffleEmbeddings(CodonEmbeddings):
+    def __init__(self, synonymousCodonsFrequencies=synonymousCodonsFrequencies):
+        super().__init__()
         codon_frequencies = dict.fromkeys(AATable)
         for aa in codon_frequencies.keys():
             codons, cumweights = list(zip(*synonymousCodonsFrequencies[aa].items()))
             codon_frequencies[aa] = {'codons': codons, 'cumweights': cumweights}
         self.codon_frequencies = codon_frequencies
 
-    def encode(self, seq, shuffle=False, seed=0):
+    def encode(self, seq, seed=0):
         assert len(seq)%3 == 0
         X = []
         for c in range(0, len(seq), 3):
             seed += 1
             codon = seq[c:c+3]
-            if shuffle:
-                freqs = self.codon_frequencies[codonTable[codon]]
-                random.seed(seed)
-                codon = random.choices(freqs['codons'], freqs['cumweights'], k=1)[0]
+            freqs = self.codon_frequencies[codonTable[codon]]
+            random.seed(seed)
+            codon = random.choices(freqs['codons'], freqs['cumweights'], k=1)[0]
             X.append(self.encoding[codon])
+        return X
+
+
+# from ImmPred.arango.old_datasets.encodings
+class AAEmbeddings(object):
+    def __init__(self):
+        self.encoding = {}
+        self.encodingLst = ['0']
+        AAs = sorted(codonTable.values())
+        self.encoding['0'] = 0
+        for i, aa in enumerate(AAs):
+            self.encoding[aa] = i +1
+            self.encodingLst.append(aa)
+
+    def encode(self, seq, codons=False):
+        X = []
+        if codons:
+            assert len(seq)%3 == 0
+            seq = [codonTable[seq[c:c+3]] for c in range(0, len(seq), 3)]
+        for c in range(len(seq)) :
+           aa = seq[c]
+           X.append(self.encoding[aa])
         return X
 
 

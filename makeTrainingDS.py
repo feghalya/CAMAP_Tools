@@ -17,6 +17,8 @@ def write_to_disk(dat, ds_name):
         pkl.dump(dat.enc_dct, f)
     with gzip.open('output/trainDS/%s_encoding-CodonShuffleEmbeddings.pkl.gz' % ds_name, 'wb') as f:
         pkl.dump(dat.shuff_enc_dct, f)
+    with gzip.open('output/trainDS/%s_encoding-AminoAcidEmbeddings.pkl.gz' % ds_name, 'wb') as f:
+        pkl.dump(dat.aa_enc_dct, f)
     with gzip.open('output/trainDS/%s-Metadata.pkl.gz' % ds_name, 'wb') as f:
         pkl.dump(dat.meta_dct, f)
 

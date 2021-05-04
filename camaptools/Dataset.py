@@ -13,7 +13,7 @@ import gc
 import sys
 
 from camaptools.GenomeData import AATable, synonymousCodonsFrequencies
-from camaptools.MLP import CodonEmbeddings
+from camaptools.MLP import CodonEmbeddings, CodonShuffleEmbeddings, AAEmbeddings
 from camaptools.EnhancedFutures import EnhancedProcessPoolExecutor, EnhancedMPIPoolExecutor, as_completed
 from camaptools.utils import ROOT, OUTPUT_FOLDER
 
@@ -47,10 +47,15 @@ class Dataset(object):
                 counts = [c/sum(counts) for c in counts]
                 synonymousCodonsFrequencies[aa] = {c:ct for c, ct in zip(cods, counts)}
         except FileNotFoundError:
-            print(os.path.join(self.output_folder, 'codonCounts/%s.tsv' % self.genome) + ' not found, loading from pyGeno')
+            print(
+                os.path.join(self.output_folder, 'codonCounts/%s.tsv' % self.genome) +\
+                ' not found, loading from pyGeno'
+            )
             from pyGeno.tools.UsefulFunctions import synonymousCodonsFrequencies
 
-        self.encoding = CodonEmbeddings(synonymousCodonsFrequencies)
+        self.encoding_codon = CodonEmbeddings()
+        self.encoding_shuffle = CodonShuffleEmbeddings(synonymousCodonsFrequencies)
+        self.encoding_aa = AAEmbeddings()
 
         dr = os.path.join(ROOT, 'data/alleles')
         fn = self.species + '.tsv'
@@ -312,7 +317,7 @@ class TrainingDataset(Dataset):
         self.dct_pep = dct_pep
 
 
-    def encode_peptides(self, seed=0):
+    def encode_peptides(self, seed=0, codon=True, shuffle=True, aa=True):
         """ The current implementation splits the original dataset, and then shuffles sequences.
         A direct consequence of this is when the same sequence is selected in more than 1 split,
         the resulting shuffling may or may not (most probable) be the same.
@@ -320,29 +325,17 @@ class TrainingDataset(Dataset):
         """
         print('Encoding dataset')
 
-        self.enc_dct = {
-            'train': [[], []],
-            'test': [[], []],
-            'validation': [[], []]
-        }
+        def generate_barebone_dct():
+            return {
+                'train': [[], []],
+                'test': [[], []],
+                'validation': [[], []]
+            }
 
-        self.shuff_enc_dct = {
-            'train': [[], []],
-            'test': [[], []],
-            'validation': [[], []]
-        }
-
-        self.meta_dct = {
-            'train': [[], []],
-            'test': [[], []],
-            'validation': [[], []]
-        }
-
-        #def fill_dcts(ds, i, res):
-        #    meta_lst, enc_lst, shuff_enc_lst = res
-        #    meta_dct[ds][i].extend(meta_lst)
-        #    enc_dct[ds][i].extend(enc_lst)
-        #    shuff_enc_dct[ds][i].extend(shuff_enc_lst)
+        self.enc_dct = generate_barebone_dct()
+        self.shuff_enc_dct = generate_barebone_dct()
+        self.meta_dct = generate_barebone_dct()
+        self.aa_enc_dct = generate_barebone_dct()
 
         random.seed(seed)
         iterseed = random.randint(10**6, 10**9)
@@ -350,61 +343,78 @@ class TrainingDataset(Dataset):
         if True:
         #if self.workers:
             ex = self.executor(max_workers=self.workers, use_threads=False)
+
             chunk_size = 10000
             futures = {}
             for ds in self.dct_pep:
                 for i in range(len(self.dct_pep[ds])):
                     iterseed += 1
                     for ix in range(0, len(self.dct_pep[ds][i]), chunk_size):
-                        pep_list = self.dct_pep[ds][i][ix:ix+chunk_size]
-                        meta_lst = [self.peptides[i][pep] for pep in pep_list]
-                        future = ex.submit(self._encode, self.encoding, meta_lst, self.context, iterseed+ix)
-                        futures[future] = (ds, i)
-            print('Futures: %d' % len(futures))
-            for future in as_completed(futures):
-                (ds, i) = futures[future]
-                res = future.result()
-                #fill_dcts(ds, i, res)
-                meta_lst, enc_lst, shuff_enc_lst = res
-                self.meta_dct[ds][i].extend(meta_lst)
-                self.enc_dct[ds][i].extend(enc_lst)
-                self.shuff_enc_dct[ds][i].extend(shuff_enc_lst)
-            ex.shutdown()
-        #else:
-        #    for ds in self.dct_pep:
-        #        for i in range(len(self.dct_pep[ds])):
-        #            iterseed += 1
-        #            pep_list = self.dct_pep[ds][i]
-        #            meta_lst = [self.peptides[i][pep] for pep in pep_list]
-        #            res = self._encode(self.encoding, meta_lst, self.context, iterseed)
-        #            fill_dcts(ds, i, res)
+                        pre_meta_lst = self.dct_pep[ds][i][ix:ix+chunk_size]
+                        meta_lst = [self.peptides[i][pep] for pep in pre_meta_lst]
+                        self.meta_dct[ds][i].extend(meta_lst)
+                        iseed = iterseed+ix
+                        if codon:
+                            future = ex.submit(self._encode_codon, self.encoding_codon, meta_lst, self.context)
+                            futures[future] = (ds, i, 'codon')
+                        if shuffle:
+                            future = ex.submit(self._encode_shuffle, self.encoding_shuffle, meta_lst, self.context,
+                                    iseed)
+                            futures[future] = (ds, i, 'shuffle')
+                        if aa:
+                            future = ex.submit(self._encode_aa, self.encoding_aa, meta_lst, self.context)
+                            futures[future] = (ds, i, 'aa')
 
-        #self.meta_dct = meta_dct
-        #self.enc_dct = enc_dct
-        #self.shuff_enc_dct = shuff_enc_dct
+            print('Futures: %d' % len(futures))
+
+            for future in as_completed(futures):
+                (ds, i, enc_type) = futures[future]
+                enc_lst = future.result()
+                if enc_type == 'codon':
+                    self.enc_dct[ds][i].extend(enc_lst)
+                elif enc_type == 'shuffle':
+                    self.shuff_enc_dct[ds][i].extend(enc_lst)
+                elif enc_type == 'aa':
+                    self.aa_enc_dct[ds][i].extend(enc_lst)
+
+            ex.shutdown()
 
 
     @staticmethod
-    def _encode(encoding, meta_lst, context_len, seed):
+    def _encode_codon(encoding, meta_lst, context_len):
         #print('encoding... %d' % len(meta_lst))
         embeds_lst = []
-        shuffle_embeds_lst = []
+        for meta in meta_lst:
+            context = meta['sequenceContext']
+            context = context[:context_len] + context[-context_len:]
+            embeds = encoding.encode(context)
+            embeds_lst.append(embeds)
+        return embeds_lst
 
+
+    @staticmethod
+    def _encode_shuffle(encoding, meta_lst, context_len, seed):
+        embeds_lst = []
         random.seed(seed)
         iterseed = random.randint(10**6, 10**9)
-
         for meta in meta_lst:
             iterseed += 1
             context = meta['sequenceContext']
             context = context[:context_len] + context[-context_len:]
-
-            embeds = encoding.encode(context)
-            shuffle_embeds = encoding.encode(context, shuffle=True, seed=iterseed)
-
+            embeds = encoding.encode(context, seed=iterseed)
             embeds_lst.append(embeds)
-            shuffle_embeds_lst.append(shuffle_embeds)
+        return embeds_lst
 
-        return meta_lst, embeds_lst, shuffle_embeds_lst
+
+    @staticmethod
+    def _encode_aa(encoding, meta_lst, context_len):
+        embeds_lst = []
+        for meta in meta_lst:
+            context = meta['sequenceContext']
+            context = context[:context_len] + context[-context_len:]
+            embeds = encoding.encode(context, codons=True)
+            embeds_lst.append(embeds)
+        return embeds_lst
 
 
 class RegressionDataset(Dataset):
@@ -571,6 +581,7 @@ class RegressionDataset(Dataset):
             elif len(ix_train)*split_ratio < len(ix_test):
                 nswitch = int((len(ix_test) - len(ix_train)*split_ratio) / (1 + split_ratio))
 
+            # NOTE: This method does not preserve class proportions
             random.seed = seed
             ix_remove = random.sample(range(len(ix_train)), nremove)
             random.seed = seed
