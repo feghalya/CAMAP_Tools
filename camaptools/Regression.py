@@ -37,8 +37,8 @@ class RegressionMetaManager(object):
 
 
     def set_load_peptides_options(self, *args, **kwargs):
-        self.load_peptides_args = args
-        self.load_peptides_kwargs = kwargs
+        for rem in self.managers:
+            rem.dataset.load_peptides_options(*args, **kwargs)
 
 
     def run(self):
@@ -46,7 +46,7 @@ class RegressionMetaManager(object):
         future = tex.submit(lambda: defaultdict(lambda: defaultdict(list)))
         for rem in self.managers:
             print(rem.name)
-            self._run(rem, self.load_peptides_args, self.load_peptides_kwargs)
+            self._run(rem)
             self.results = future.result()
             future = tex.submit(self._save, rem, self.results, self.out_dir)
         self.results = future.result()
@@ -65,9 +65,9 @@ class RegressionMetaManager(object):
 
 
     @staticmethod
-    def _run(rem, args, kwargs):
-        #rem.dataset.pepfiles = [x for x in rem.dataset.pepfiles if 'W' in x]
-        rem.dataset.load_peptides(*args, **kwargs)
+    def _run(rem):
+        #rem.dataset.pepfiles = [x for x in rem.dataset.pepfiles if 'W9' in x]
+        rem.dataset.load_peptides()
         rem.dataset.construct_datasets()
         rem.dataset.clear_unused()
         rem.initialize_trainers()
@@ -232,7 +232,7 @@ class RegressionTrainer(object):
         """ NOTE: Cannot fork if using MPIPoolExecutor (must use workers=0)
         """
         self.workers = workers
-        # careful not to parallelize too much, as LogisticRegression spawns its own processes with all available CPUs
+        # careful with parallelization as LogisticRegression spawns its own processes with all available CPUs
         self.executor = EnhancedProcessPoolExecutor if executor is None else executor
 
         self.dataset = dataset
@@ -260,27 +260,31 @@ class RegressionTrainer(object):
         df_training, df_test = self.dataset
 
         self.regressions = []
-        w = self.workers + 1
-        sub_x_labels_groups = [self.all_combinations[n:n+w] for n in range(0, len(self.all_combinations), w)]
-        for sub_x_labels in sub_x_labels_groups:
-            p = ex.submit(self._submit, sub_x_labels, df_training, df_test, self.seed, self.executor)
+        #w = self.workers + 1
+        #sub_x_labels_groups = [self.all_combinations[n:n+w] for n in range(0, len(self.all_combinations), w)]
+        #for sub_x_labels in sub_x_labels_groups:
+        #    p = ex.submit(self._submit, sub_x_labels, df_training, df_test, self.seed, self.executor)
+        #    self.regressions.append(p)
+        for x_labels in self.all_combinations:
+            p = ex.submit(self.train_regression, x_labels, df_training, df_test, self.seed)
             self.regressions.append(p)
 
 
-    @classmethod
-    def _submit(cls, sub_x_labels, df_training, df_test, seed, executor):
-        workers = len(sub_x_labels) - 1
-        sub_regressions = []
-        with executor(max_workers=workers, use_threads=True) as sex:  # secondary ex
-            for x_labels in sub_x_labels:
-                p = sex.submit(cls.train_regression, x_labels, df_training, df_test, seed)
-                sub_regressions.append(p)
-            print(sex)
-        return [p.result() for p in sub_regressions]
+    #@classmethod
+    #def _submit(cls, sub_x_labels, df_training, df_test, seed, executor):
+    #    workers = len(sub_x_labels) - 1
+    #    sub_regressions = []
+    #    with executor(max_workers=workers, use_threads=True) as sex:  # secondary ex
+    #        for x_labels in sub_x_labels:
+    #            p = sex.submit(cls.train_regression, x_labels, df_training, df_test, seed)
+    #            sub_regressions.append(p)
+    #        print(sex)
+    #    return [p.result() for p in sub_regressions]
 
 
     def join(self):
-        regressions = [res for p in self.regressions for res in p.result()]
+        #regressions = [res for p in self.regressions for res in p.result()]
+        regressions = [p.result() for p in self.regressions]
 
         results = {}
         results_max = {}

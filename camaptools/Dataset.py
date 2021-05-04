@@ -78,8 +78,15 @@ class Dataset(object):
         #self.tpm_dct = {x:y for x, y in self.tpm_dct.items() if float(y)>0.1}
 
 
-    def load_peptides(self, max_bs_or_rank=1250, var='nM', max_contexts=3,
-            step='createDS', ann_method='Adam', ann_params='e500pep9t5', max_replicates=None):
+    def load_peptides_options(self,
+            max_bs_or_rank=1250,
+            var='nM',
+            max_contexts=3,
+            step='createDS',
+            ann_method='Adam',
+            ann_params='e500pep9t5',
+            max_replicates=None
+        ):
 
         self.max_bs_or_rank = max_bs_or_rank
         self.max_contexts = max_contexts if not max_contexts is None else np.inf
@@ -97,6 +104,12 @@ class Dataset(object):
         else:
             assert var in ['nM', 'Rank', 'Rank_NP']
         self.var = var
+
+
+    def load_peptides(self):
+        if not hasattr(self, 'var'):
+            sys.stderr.write('WARNING: Load peptides options not set, using default values\n')
+            self.load_peptides_options()
 
         # Construct datasets
         workers = min(self.workers, len(self.pepfiles))
@@ -307,34 +320,35 @@ class TrainingDataset(Dataset):
         """
         print('Encoding dataset')
 
-        enc_dct = {
+        self.enc_dct = {
             'train': [[], []],
             'test': [[], []],
             'validation': [[], []]
         }
 
-        shuff_enc_dct = {
+        self.shuff_enc_dct = {
             'train': [[], []],
             'test': [[], []],
             'validation': [[], []]
         }
 
-        meta_dct = {
+        self.meta_dct = {
             'train': [[], []],
             'test': [[], []],
             'validation': [[], []]
         }
 
-        def fill_dcts(ds, i, res):
-            meta_lst, enc_lst, shuff_enc_lst = res
-            meta_dct[ds][i].extend(meta_lst)
-            enc_dct[ds][i].extend(enc_lst)
-            shuff_enc_dct[ds][i].extend(shuff_enc_lst)
+        #def fill_dcts(ds, i, res):
+        #    meta_lst, enc_lst, shuff_enc_lst = res
+        #    meta_dct[ds][i].extend(meta_lst)
+        #    enc_dct[ds][i].extend(enc_lst)
+        #    shuff_enc_dct[ds][i].extend(shuff_enc_lst)
 
         random.seed(seed)
         iterseed = random.randint(10**6, 10**9)
 
-        if self.workers:
+        if True:
+        #if self.workers:
             ex = self.executor(max_workers=self.workers, use_threads=False)
             chunk_size = 10000
             futures = {}
@@ -350,20 +364,24 @@ class TrainingDataset(Dataset):
             for future in as_completed(futures):
                 (ds, i) = futures[future]
                 res = future.result()
-                fill_dcts(ds, i, res)
+                #fill_dcts(ds, i, res)
+                meta_lst, enc_lst, shuff_enc_lst = res
+                self.meta_dct[ds][i].extend(meta_lst)
+                self.enc_dct[ds][i].extend(enc_lst)
+                self.shuff_enc_dct[ds][i].extend(shuff_enc_lst)
             ex.shutdown()
-        else:
-            for ds in self.dct_pep:
-                for i in range(len(self.dct_pep[ds])):
-                    iterseed += 1
-                    pep_list = self.dct_pep[ds][i]
-                    meta_lst = [self.peptides[i][pep] for pep in pep_list]
-                    res = self._encode(self.encoding, meta_lst, self.context, iterseed)
-                    fill_dcts(ds, i, res)
+        #else:
+        #    for ds in self.dct_pep:
+        #        for i in range(len(self.dct_pep[ds])):
+        #            iterseed += 1
+        #            pep_list = self.dct_pep[ds][i]
+        #            meta_lst = [self.peptides[i][pep] for pep in pep_list]
+        #            res = self._encode(self.encoding, meta_lst, self.context, iterseed)
+        #            fill_dcts(ds, i, res)
 
-        self.meta_dct = meta_dct
-        self.enc_dct = enc_dct
-        self.shuff_enc_dct = shuff_enc_dct
+        #self.meta_dct = meta_dct
+        #self.enc_dct = enc_dct
+        #self.shuff_enc_dct = shuff_enc_dct
 
 
     @staticmethod
@@ -391,8 +409,8 @@ class TrainingDataset(Dataset):
 
 class RegressionDataset(Dataset):
     def construct_datasets(self):
-        """
-        self.load_peptides needs to be executed for all required variables to get populated
+        """Note that self.load_peptides needs to be executed for all required
+        variables to get populated
 
         """
         try:
@@ -404,14 +422,21 @@ class RegressionDataset(Dataset):
         # Construct datasets
 
         workers = min(self.workers, n_replicates)
-        subworkers = (self.workers - workers) // n_replicates
-        subworkers = 0  # _process_df does nothing (for now)
+        #subworkers = (self.workers - workers) // n_replicates
+        #subworkers = 0
+        # _process_df does nothing (for now)
+        # additionaly, we cannot fork if using MPIPoolExecutor
 
         with self.executor(max_workers=workers, use_threads=False) as ex:
             processes = []
-            for i, (ns, s) in enumerate(zip(*self.df_dictionnaries)):
+            for i, (nonsource, source) in enumerate(zip(*self.df_dictionnaries)):
                 seed = i + 1
-                p = ex.submit(self._create_preprocess_split, seed, ns, s, self.executor, subworkers)
+                p = ex.submit(
+                    self._create_preprocess_split,
+                    seed,
+                    nonsource,
+                    source
+                )  #self.executor, subworkers)
                 processes.append(p)
             print(ex)
         datasets, metadata = zip(*[p.result() for p in processes])
@@ -480,17 +505,22 @@ class RegressionDataset(Dataset):
 
 
     @classmethod
-    def _create_preprocess_split(cls, seed, ns, s, executor, workers):
+    def _create_preprocess_split(cls, seed, nonsource, source):  #executor, workers):
         print('doing %d' % seed)
         metadata = []
-        with executor(max_workers=workers, use_threads=True) as ex:
-            procs = []
-            for df, subname in cls._preprocess_df(cls._create_df(ns, s)):
+        datasets = []
+        if True:
+        #with executor(max_workers=workers, use_threads=True) as ex:
+            #procs = []
+            res = cls._preprocess_df(cls._create_df(nonsource, source))
+            for df, subname in res:
+                dat = cls._split_and_normalize_df(df, seed)
                 metadata.append((seed, subname))
-                p = ex.submit(cls._split_and_normalize_df, df, seed)
-                procs.append(p)
-            print(ex)
-        datasets = [p.result() for p in procs]
+                datasets.append(dat)
+                #p = ex.submit(cls._split_and_normalize_df, df, seed)
+                #procs.append(p)
+            #print(ex)
+        #datasets = [p.result() for p in procs]
         print('done %d' % seed)
         return datasets, metadata
 

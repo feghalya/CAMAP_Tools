@@ -57,7 +57,8 @@ def main():
 
     dat = TrainingDataset(genome, ds, context_len, workers=workers, executor=Executor)
     dat.pepfiles = [f for f in dat.pepfiles if '%s.pkl' % peplen in f]
-    dat.load_peptides(max_bs_or_rank=max_bs_or_rank, max_contexts=max_contexts)
+    dat.load_peptides_options(max_bs_or_rank=max_bs_or_rank, max_contexts=max_contexts)
+    dat.load_peptides()
 
     for seed in seeds:
         dat.split_dataset(ratio=ratio, same_tpm=same_tpm, same_bs=same_bs, seed=seed)
