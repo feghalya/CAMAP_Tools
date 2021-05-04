@@ -8,8 +8,9 @@ function runPBS {
     genome=$1
     fullname=${name}_${genome}
     echo $fullname
-    filters=$2
-    if [ ! -z $filters ]; then filters="-f $filters "; fi
+    algorithms=$2
+    parameters=$3
+    filters=${algorithms}${parameters}
 
     echo '#!/usr/bin/env bash'"
 source /home/feghalya/.virtualenvs/ml/bin/activate
@@ -24,9 +25,9 @@ sacct --format=JobID%15,State,ExitCode,CPUTime,MaxRSS,Start,End --units M -j \$S
 module purge
 mkdir -p log
 
-#runPBS GRCh37.75 SGD,SGD_Shuffle
-#runPBS GRCm38.78 SGD,SGD_Shuffle
-runPBS GRCh37.75 Adam,Adam_Shuffle
-runPBS GRCm38.78 Adam,Adam_Shuffle
+runPBS GRCh37.75 "-a SGD,SGD_Shuffle " "-p e4000pep9t5y,e4000pep9t5z "
+runPBS GRCm38.78 "-a SGD,SGD_Shuffle " "-p e4000pep9t5y,e4000pep9t5z "
+#runPBS GRCh37.75 Adam,Adam_Shuffle
+#runPBS GRCm38.78 Adam,Adam_Shuffle
 #runPBS GRCh38.98 Adam,Adam_Shuffle
 #runPBS GRCm38.98 Adam,Adam_Shuffle

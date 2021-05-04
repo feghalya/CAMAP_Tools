@@ -1,1 +1,1 @@
-jobs/step5_createDS.sh
+jobs/step7_annotateProteome.sh

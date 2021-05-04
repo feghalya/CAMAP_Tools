@@ -10,13 +10,15 @@ from camaptools.GenomeData import codonTable, AATable, synonymousCodonsFrequenci
 from camaptools.utils import available_models
 
 
-def load_models(context=162, filters=None):
-    filters = filters if filters is None or type(filters) == list else [filters]
+def load_models(context=162, algorithms=None, parameters=None):
+    algorithms = algorithms if type(algorithms) != str else [algorithms]
+    parameters = parameters if type(parameters) != str else [parameters]
     def load():
         return available_models(
             target = 'validation-bestMin-score.pytorch',
             context = context,
-            filters = filters
+            algorithms = algorithms,
+            parameters = parameters
             )
 
     model_names = {context: load()}

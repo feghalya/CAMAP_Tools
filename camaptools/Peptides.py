@@ -34,8 +34,8 @@ class Peptides(object):
         self.executor = EnhancedProcessPoolExecutor if executor is None else executor
 
 
-    def annotate(self, overwrite=False, filters=None):
-        self.model_names, self.models = load_models(self.context, filters)
+    def annotate(self, overwrite=False, algorithms=None, parameters=None):
+        self.model_names, self.models = load_models(self.context, algorithms, parameters)
         self.overwrite = overwrite
 
         with self.executor(max_workers=self.workers, use_threads=True) as ex:

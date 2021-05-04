@@ -8,7 +8,7 @@ from parse import parse
 ROOT = '/'.join(os.path.realpath(__file__).split('/')[:-2])
 OUTPUT_FOLDER = os.path.join(ROOT, "output")
 
-def available_models(target='validation-bestMin-score.pytorch', context=162, filters=None):
+def available_models(target='validation-bestMin-score.pytorch', context=162, algorithms=None, parameters=None):
     out_dir = OUTPUT_FOLDER
     model_listing = defaultdict(lambda: defaultdict(dict))
     model_files = glob(os.path.join(out_dir, 'pytorch-*', '*', target))
@@ -22,11 +22,13 @@ def available_models(target='validation-bestMin-score.pytorch', context=162, fil
         m = dct['method']
         c = int(dct['context'])
 
+        name = m.split('_')[0].replace('sgd', 'SGD').replace('adam', 'Adam').replace('adagrad',
+            'Adagrad').replace('shuffle', 'Shuffle').replace('mask', 'Mask').replace('-', '_')
+
         if context == c:
-            name = m.split('_')[0].replace('sgd', 'SGD').replace('adam', 'Adam').replace('adagrad',
-                'Adagrad').replace('shuffle', 'Shuffle').replace('mask', 'Mask').replace('-', '_')
-            if filters is None or name in filters:
-                model_listing[name][params][n] = mf
+            if algorithms is None or name in algorithms:
+                if parameters is None or params in parameters:
+                    model_listing[name][params][n] = mf
 
     for name in model_listing.keys():
         for k in model_listing[name]:
