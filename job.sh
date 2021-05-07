@@ -1,1 +1,0 @@
-jobs/step7_annotateProteome.sh

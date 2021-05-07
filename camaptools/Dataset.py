@@ -31,7 +31,8 @@ class Dataset(object):
         self.context = context
 
         # detect pickle peptide files
-        pepfiles = [os.path.join(self.out_dir, f) for f in os.listdir(self.out_dir) if f[:8] == 'peptides']
+        fs = os.listdir(self.out_dir)
+        pepfiles = [os.path.join(self.out_dir, f) for f in fs if f[:8] == 'peptides']
         self.pepfiles = pepfiles
 
         self.cellline = cellline
@@ -39,7 +40,8 @@ class Dataset(object):
 
         # calculate synonymous codon frequencies
         try:
-            with open(os.path.join(self.output_folder, 'codonCounts/%s.tsv' % self.genome), 'r') as f:
+            count_path = os.path.join(self.output_folder, 'codonCounts/%s.tsv' % self.genome)
+            with open(count_path, 'r') as f:
                 codons = dict([s.strip().split('\t') for s in f])
             synonymousCodonsFrequencies = dict.fromkeys(AATable)
             for aa, cods in AATable.items():
@@ -79,7 +81,8 @@ class Dataset(object):
         assert len(expression_file) == 1
         expression_file = expression_file[0]
         with open(expression_file, 'r') as f:
-            self.tpm_dct = {l.strip().split('\t')[0]:float(l.strip().split('\t')[1]) for l in f.readlines()}
+            data = [l.strip().split('\t') for l in f.readlines()]
+        self.tpm_dct = {l[0]:float(l[1]) for l in data}
         #self.tpm_dct = {x:y for x, y in self.tpm_dct.items() if float(y)>0.1}
 
 
@@ -193,20 +196,27 @@ class Dataset(object):
                             transcripts.append(tr)
                             tr_set.update(tr)
                             for t in tr:
-                                # WARNING: Not taking into account min_BS
-                                #          This would create a set of transcripts that are not source
-                                #          but also not non-source, which are discarded anyway and never
-                                #          appear in the negative dataset
+                                # WARNING
+                                #   Not taking into account min_BS
+                                #   This would create a set of transcripts that are not source
+                                #   but also not non-source, which are discarded anyway and never
+                                #   appear in the negative dataset
                                 tr_is_source[t] = tr_is_source[t] or (pep in self.detected_peptides)
                 if len(contexts) and len(contexts) <= self.max_contexts:
                     peptr[pep] = tr_set
-                    pepbs[pep] = 1 - np.log(bs_or_rank) / np.log(50000) if self.var == 'nM' else bs_or_rank
+                    if self.var == 'nM':
+                        pepbs[pep] = 1 - np.log(bs_or_rank) / np.log(50000)
+                    else:
+                        pepbs[pep] = bs_or_rank
+
                     for i, (g_cont, tr) in enumerate(zip(contexts, transcripts)):
                         exp = [self.tpm_dct[t] for t in tr]
                         if '!GA' not in g_cont['sequenceContext']:
                             pepexpr[(pep, i)] = (exp, tr)
+
                             if self.step == 'createDS':
-                                peptides[ix][(pep, i)] = {k: v for k, v in g_cont.items() if k != 'CAMAPScore'}
+                                dct = {k: v for k, v in g_cont.items() if k != 'CAMAPScore'}
+                                peptides[ix][(pep, i)] = dct
                                 peptides[ix][(pep, i)]['expressedTranscripts'] = tr
                                 peptides[ix][(pep, i)]['expressedTranscriptsExpression'] = exp
                                 peptides[ix][(pep, i)]['bindingAffinity'] = pepbs[pep]
@@ -249,8 +259,10 @@ class TrainingDataset(Dataset):
 
         if copy_distribution:
             if same_tpm:
-                ns_exp = pd.Series(np.log2(np.array([np.mean(self.pepexpr[pep][0]) for pep in peplist_nonsource])))
-                s_exp = np.log2(np.array([np.mean(self.pepexpr[pep][0]) for pep in peplist_source]))
+                ns_exp = [np.mean(self.pepexpr[pep][0]) for pep in peplist_nonsource]
+                ns_exp = pd.Series(np.log2(np.array(ns_exp)))
+                s_exp = [np.mean(self.pepexpr[pep][0]) for pep in peplist_source]
+                s_exp = np.log2(np.array(s_exp))
             elif same_bs:
                 ns_exp = pd.Series(np.array([self.pepbs[pep[0]] for pep in peplist_nonsource]))
                 s_exp = np.array([self.pepbs[pep[0]] for pep in peplist_source])
@@ -295,7 +307,11 @@ class TrainingDataset(Dataset):
             if ratio == 1:
                 keep = peplist_nonsource
             else:
-                discard, keep = train_test_split(peplist_nonsource, test_size=ratio, random_state=seed)
+                discard, keep = train_test_split(
+                    peplist_nonsource,
+                    test_size=ratio,
+                    random_state=seed
+                )
 
         dct_pep = {
             'train': [[], []],
@@ -303,16 +319,36 @@ class TrainingDataset(Dataset):
             'validation': [[], []]
         }
 
-        dct_pep['train'][0], pre_test = train_test_split(keep, test_size=0.4, random_state=seed)
-        dct_pep['validation'][0], dct_pep['test'][0] = train_test_split(pre_test, test_size=0.5, random_state=seed)
+        dct_pep['train'][0], pre_test = train_test_split(
+            keep,
+            test_size=0.4,
+            random_state=seed
+        )
+        dct_pep['validation'][0], dct_pep['test'][0] = train_test_split(
+            pre_test,
+            test_size=0.5,
+            random_state=seed
+        )
 
         #if debug:
         #    if copy_distribution:
         #        nr = len(dct_pep['test'][0])/len(unfiltered_nonsource)
-        #        _, dct_pep['test'][0] = train_test_split(unfiltered_nonsource, test_size=nr, random_state=seed)
+        #        _, dct_pep['test'][0] = train_test_split(
+        #            unfiltered_nonsource,
+        #            test_size=nr,
+        #            random_state=seed
+        #        )
 
-        dct_pep['train'][1], pre_test = train_test_split(peplist_source, test_size=0.4, random_state=seed)
-        dct_pep['validation'][1], dct_pep['test'][1] = train_test_split(pre_test, test_size=0.5, random_state=seed)
+        dct_pep['train'][1], pre_test = train_test_split(
+            peplist_source,
+            test_size=0.4,
+            random_state=seed
+        )
+        dct_pep['validation'][1], dct_pep['test'][1] = train_test_split(
+            pre_test,
+            test_size=0.5,
+            random_state=seed
+        )
 
         self.dct_pep = dct_pep
 
@@ -340,44 +376,57 @@ class TrainingDataset(Dataset):
         random.seed(seed)
         iterseed = random.randint(10**6, 10**9)
 
-        if True:
-        #if self.workers:
-            ex = self.executor(max_workers=self.workers, use_threads=False)
+        ex = self.executor(max_workers=self.workers, use_threads=False)
 
-            chunk_size = 10000
-            futures = {}
-            for ds in self.dct_pep:
-                for i in range(len(self.dct_pep[ds])):
-                    iterseed += 1
-                    for ix in range(0, len(self.dct_pep[ds][i]), chunk_size):
-                        pre_meta_lst = self.dct_pep[ds][i][ix:ix+chunk_size]
-                        meta_lst = [self.peptides[i][pep] for pep in pre_meta_lst]
-                        self.meta_dct[ds][i].extend(meta_lst)
-                        iseed = iterseed+ix
-                        if codon:
-                            future = ex.submit(self._encode_codon, self.encoding_codon, meta_lst, self.context)
-                            futures[future] = (ds, i, 'codon')
-                        if shuffle:
-                            future = ex.submit(self._encode_shuffle, self.encoding_shuffle, meta_lst, self.context,
-                                    iseed)
-                            futures[future] = (ds, i, 'shuffle')
-                        if aa:
-                            future = ex.submit(self._encode_aa, self.encoding_aa, meta_lst, self.context)
-                            futures[future] = (ds, i, 'aa')
+        chunk_size = 10000
+        futures = {}
+        for ds in self.dct_pep:
+            for i in range(len(self.dct_pep[ds])):
+                iterseed += 1
+                for ix in range(0, len(self.dct_pep[ds][i]), chunk_size):
+                    pre_meta_lst = self.dct_pep[ds][i][ix:ix+chunk_size]
+                    meta_lst = [self.peptides[i][pep] for pep in pre_meta_lst]
+                    self.meta_dct[ds][i].extend(meta_lst)
+                    iseed = iterseed+ix
+                    if codon:
+                        future = ex.submit(
+                            self._encode_codon,
+                            self.encoding_codon,
+                            meta_lst,
+                            self.context
+                        )
+                        futures[future] = (ds, i, 'codon')
+                    if shuffle:
+                        future = ex.submit(
+                            self._encode_shuffle,
+                            self.encoding_shuffle,
+                            meta_lst,
+                            self.context,
+                            iseed
+                        )
+                        futures[future] = (ds, i, 'shuffle')
+                    if aa:
+                        future = ex.submit(
+                            self._encode_aa,
+                            self.encoding_aa,
+                            meta_lst,
+                            self.context
+                        )
+                        futures[future] = (ds, i, 'aa')
 
-            print('Futures: %d' % len(futures))
+        print('Futures: %d' % len(futures))
 
-            for future in as_completed(futures):
-                (ds, i, enc_type) = futures[future]
-                enc_lst = future.result()
-                if enc_type == 'codon':
-                    self.enc_dct[ds][i].extend(enc_lst)
-                elif enc_type == 'shuffle':
-                    self.shuff_enc_dct[ds][i].extend(enc_lst)
-                elif enc_type == 'aa':
-                    self.aa_enc_dct[ds][i].extend(enc_lst)
+        for future in as_completed(futures):
+            (ds, i, enc_type) = futures[future]
+            enc_lst = future.result()
+            if enc_type == 'codon':
+                self.enc_dct[ds][i].extend(enc_lst)
+            elif enc_type == 'shuffle':
+                self.shuff_enc_dct[ds][i].extend(enc_lst)
+            elif enc_type == 'aa':
+                self.aa_enc_dct[ds][i].extend(enc_lst)
 
-            ex.shutdown()
+        ex.shutdown()
 
 
     @staticmethod
@@ -605,8 +654,10 @@ class RegressionDataset(Dataset):
             ix_train += ix_train_split
             ix_test += ix_test_split
 
-            df_train = df.reset_index(level='Class').loc[ix_train].reset_index().set_index(['Peptide', 'Class'])
-            df_test = df.reset_index(level='Class').loc[ix_test].reset_index().set_index(['Peptide', 'Class'])
+            df_train = df.reset_index(level='Class').loc[ix_train]
+            df_train = df_train.reset_index().set_index(['Peptide', 'Class'])
+            df_test = df.reset_index(level='Class').loc[ix_test]
+            df_test = df_test.reset_index().set_index(['Peptide', 'Class'])
 
             # alternative method:
             #df_train = df.loc[(ix_train, slice(None)), :]
@@ -618,13 +669,15 @@ class RegressionDataset(Dataset):
 
             columns = df_train.columns
             df_train.columns = [x + 'Base' for x in columns]
-            df_train_norm = pd.DataFrame(scaler.transform(df_train), columns=columns, index=df_train.index)
+            train_norm = scaler.transform(df_train)
+            df_train_norm = pd.DataFrame(train_norm, columns=columns, index=df_train.index)
             df_train = pd.concat([df_train_norm, df_train], axis=1)
             df_train = df_train.reset_index().set_index('Peptide')
 
             columns = df_test.columns
             df_test.columns = [x + 'Base' for x in columns]
-            df_test_norm = pd.DataFrame(scaler.transform(df_test), columns=columns, index=df_test.index)
+            test_norm = scaler.transform(df_test)
+            df_test_norm = pd.DataFrame(test_norm, columns=columns, index=df_test.index)
             df_test = pd.concat([df_test_norm, df_test], axis=1)
             df_test = df_test.reset_index().set_index('Peptide')
 
