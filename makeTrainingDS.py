@@ -9,18 +9,29 @@ from camaptools.Dataset import TrainingDataset
 from camaptools.EnhancedFutures import EnhancedProcessPoolExecutor, EnhancedMPIPoolExecutor
 
 
-def write_to_disk(dat, ds_name):
+def write_to_disk(dat, ds_name, save_meta):
     if not os.path.exists('output/trainDS'):
         os.makedirs('output/trainDS')
 
-    with gzip.open('output/trainDS/%s_encoding-CodonEmbeddings.pkl.gz' % ds_name, 'wb') as f:
-        pkl.dump(dat.enc_dct, f)
-    with gzip.open('output/trainDS/%s_encoding-CodonShuffleEmbeddings.pkl.gz' % ds_name, 'wb') as f:
-        pkl.dump(dat.shuff_enc_dct, f)
-    with gzip.open('output/trainDS/%s_encoding-AminoAcidEmbeddings.pkl.gz' % ds_name, 'wb') as f:
-        pkl.dump(dat.aa_enc_dct, f)
-    with gzip.open('output/trainDS/%s-Metadata.pkl.gz' % ds_name, 'wb') as f:
-        pkl.dump(dat.meta_dct, f)
+    if hasattr(dat, 'enc_dct'):
+        out_name = 'output/trainDS/%s_encoding-CodonEmbeddings.pkl.gz' % ds_name
+        with gzip.open(out_name, 'wb') as f:
+            pkl.dump(dat.enc_dct, f)
+
+    if hasattr(dat, 'shuff_enc_dct'):
+        out_name = 'output/trainDS/%s_encoding-CodonShuffleEmbeddings.pkl.gz' % ds_name
+        with gzip.open(out_name, 'wb') as f:
+            pkl.dump(dat.shuff_enc_dct, f)
+
+    if hasattr(dat, 'aa_enc_dct'):
+        out_name = 'output/trainDS/%s_encoding-AminoAcidEmbeddings.pkl.gz' % ds_name
+        with gzip.open(out_name, 'wb') as f:
+            pkl.dump(dat.aa_enc_dct, f)
+
+    if save_meta:
+        out_name = 'output/trainDS/%s-Metadata.pkl.gz' % ds_name
+        with gzip.open(out_name, 'wb') as f:
+            pkl.dump(dat.meta_dct, f)
 
 
 def main():
@@ -35,6 +46,10 @@ def main():
     parser.add_argument("-t", "--ratio", help="non-source to source ratio", type=int, default=None)
     parser.add_argument("-y", "--sametpm", help="sample non-source keeping TPM proportions", action='store_true')
     parser.add_argument("-z", "--samebs", help="sample non-source keeping nM proportions", action='store_true')
+    parser.add_argument("--no-codon", help="do not encode codons", action='store_false')
+    parser.add_argument("--no-shuffle", help="do not encode shuffled codons", action='store_false')
+    parser.add_argument("--no-aa", help="do not encode amino acids", action='store_false')
+    parser.add_argument("--no-meta", help="do not save metadata", action='store_false')
     parser.add_argument("-s", "--nsplits", help="number of random splittings", type=int, default=1)
     parser.add_argument("-w", "--workers", help="number of parallel workers in addition to main", type=int, default=0)
     parser.add_argument("--mpi", help="Parallelize using MPI", action='store_true')
@@ -50,6 +65,10 @@ def main():
     ratio = args['ratio']
     same_tpm = args['sametpm']
     same_bs = args['samebs']
+    codon = args['no_codon']
+    shuffle = args['no_shuffle']
+    aa = args['no_aa']
+    meta = args['no_meta']
     seeds = [int(s) for s in range(1, args['nsplits']+1)]
 
     workers = args['workers']
@@ -64,12 +83,20 @@ def main():
 
     for seed in seeds:
         dat.split_dataset(ratio=ratio, same_tpm=same_tpm, same_bs=same_bs, seed=seed)
-        dat.encode_peptides(seed=seed)
+        dat.encode_peptides(seed=seed, codon=codon, shuffle=shuffle, aa=aa)
         ds_name = '%s_%s_padding%d_maxBS%d_maxContexts%d_ratio%d_%s%s%sseed%d' % (
-                ds, genome, context_len, max_bs_or_rank, max_contexts if max_contexts else 0,
-                ratio if ratio else 0, 'peplen%s_' % peplen if peplen else '', 'sameTPM_' if same_tpm else '',
-                'sameBS_' if same_bs else '', seed)
-        write_to_disk(dat, ds_name)
+            ds,
+            genome,
+            context_len,
+            max_bs_or_rank,
+            max_contexts if max_contexts else 0,
+            ratio if ratio else 0,
+            'peplen%s_' % peplen if peplen else '',
+            'sameTPM_' if same_tpm else '',
+            'sameBS_' if same_bs else '',
+            seed
+        )
+        write_to_disk(dat, ds_name, meta)
 
 
 if __name__ == '__main__':

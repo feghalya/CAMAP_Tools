@@ -93,15 +93,21 @@ class Dataset(object):
             step='createDS',
             ann_method='Adam',
             ann_params='e500pep9t5',
-            max_replicates=None
+            max_replicates=None,
+            remove_neg_source=True
         ):
 
         self.max_bs_or_rank = max_bs_or_rank
         self.max_contexts = max_contexts if not max_contexts is None else np.inf
         self.step = step
-        self.ann_method = ann_method  # only applicable if step=='evaluateDS'
-        self.ann_params = ann_params  # only applicable if step=='evaluateDS'
+        self.ann_method = ann_method  # only applicable if step is 'evaluateDS' or 'getDS'
+        self.ann_params = ann_params  # only applicable if step is 'evaluateDS' or 'getDS'
         self.max_replicates = max_replicates
+        self.remove_neg_source = remove_neg_source
+
+        if self.step not in ['createDS', 'evaluateDS', 'getDS']:
+            sys.stderr.write('ERROR: Unknown option given to step argument')
+            sys.exit(1)
 
         if self.max_bs_or_rank < 100 and var != 'Rank' and var != 'Rank_NP':
             print('nM < 100 --> Using Rank')
@@ -143,16 +149,17 @@ class Dataset(object):
 
         self.source_transcripts = set([t for t, v in source_tr_dct.items() if v])
 
-        # remove peptides present in source transcripts
-        rem = set()
-        for pep in list(pepdict_nonsource.keys()):
-            p = pep[0]
-            if peptr[p].intersection(self.source_transcripts):
-                del pepdict_nonsource[pep]
-                del pepexpr[pep]
-                rem.add(p)
-        for p in rem:
-            del peptr[p]
+        # remove nonsource peptides present in source transcripts
+        if self.remove_neg_source:
+            rem = set()
+            for pep in list(pepdict_nonsource.keys()):
+                p = pep[0]
+                if peptr[p].intersection(self.source_transcripts):
+                    del pepdict_nonsource[pep]
+                    del pepexpr[pep]
+                    rem.add(p)
+            for p in rem:
+                del peptr[p]
 
         self.pepexpr = pepexpr
         self.pepbs = pepbs
@@ -214,22 +221,23 @@ class Dataset(object):
                         if '!GA' not in g_cont['sequenceContext']:
                             pepexpr[(pep, i)] = (exp, tr)
 
-                            if self.step == 'createDS':
+                            if self.step == 'createDS' or self.step == 'getDS':
                                 dct = {k: v for k, v in g_cont.items() if k != 'CAMAPScore'}
                                 peptides[ix][(pep, i)] = dct
                                 peptides[ix][(pep, i)]['expressedTranscripts'] = tr
                                 peptides[ix][(pep, i)]['expressedTranscriptsExpression'] = exp
                                 peptides[ix][(pep, i)]['bindingAffinity'] = pepbs[pep]
                                 peptides[ix][(pep, i)]['bindingAffinityMetric'] = self.var
-                            elif self.step == 'evaluateDS':
+
+                            if self.step == 'evaluateDS' or self.step == 'getDS':
                                 dct = g_cont['CAMAPScore']
                                 dct = {k:dct[k] for k in dct if k.split('_')[0] == self.ann_method}
                                 for key in dct:
                                     dct[key] = dct[key][self.context][self.ann_params][:self.max_replicates]
-                                peptides[ix][(pep, i)] = dct
-                            else:
-                                sys.stderr.write('ERROR: Unknown option given to step argument')
-                                sys.exit(1)
+                                if self.step == 'evaluateDS':
+                                    peptides[ix][(pep, i)] = dct
+                                else:
+                                    peptides[ix][(pep, i)]['CAMAPScore'] = dct
 
         return peptides[0], peptides[1], tr_is_source, peptr, pepexpr, pepbs
 
@@ -368,10 +376,13 @@ class TrainingDataset(Dataset):
                 'validation': [[], []]
             }
 
-        self.enc_dct = generate_barebone_dct()
-        self.shuff_enc_dct = generate_barebone_dct()
         self.meta_dct = generate_barebone_dct()
-        self.aa_enc_dct = generate_barebone_dct()
+        if codon:
+            self.enc_dct = generate_barebone_dct()
+        if shuffle:
+            self.shuff_enc_dct = generate_barebone_dct()
+        if aa:
+            self.aa_enc_dct = generate_barebone_dct()
 
         random.seed(seed)
         iterseed = random.randint(10**6, 10**9)
