@@ -120,8 +120,8 @@ class Dataset(object):
         self.remove_neg_source = remove_neg_source
 
         if self.step not in ['createDS', 'evaluateDS', 'getDS']:
-            sys.stderr.write('ERROR: Unknown option given to step argument')
-            sys.exit(1)
+            sys.stderr.write('WARNING: Unknown option given to step argument.\n')
+            self.step = 'createDS'
 
         if self.max_bs_or_rank < 100 and var != 'Rank' and var != 'Rank_NP':
             print('nM < 100 --> Using Rank')
@@ -154,40 +154,27 @@ class Dataset(object):
         with self.executor(max_workers=workers, use_threads=False) as ex:
             out_dcts = ex.map(self._load_peptides, self.pepfiles)
 
-        pepdict_nonsource = {}
-        pepdict_source = {}
-        peptr = {}
-        pepexpr = {}
-        pepbs = {}
+        peptides = [{}, {}]
         source_tr_dct = {k: False for k in self.tpm_dct.keys()}
 
-        for nonsource_dct, source_dct, tdict, pit, pexp, pbs in out_dcts:
-            pepdict_nonsource.update(nonsource_dct)
-            pepdict_source.update(source_dct)
-            peptr.update(pit)
-            pepexpr.update(pexp)
-            pepbs.update(pbs)
+        for peps, tdict in out_dcts:
+            ns, s = peps
+            peptides[0].update(ns)
+            peptides[1].update(s)
             for key, val in tdict.items():
                 source_tr_dct[key] = source_tr_dct[key] or val
 
-        self.source_transcripts = set([t for t, v in source_tr_dct.items() if v])
+        source_transcripts = set([t for t, v in source_tr_dct.items() if v])
 
         # remove nonsource peptides present in source transcripts
         if self.remove_neg_source:
-            rem = set()
-            for pep in list(pepdict_nonsource.keys()):
-                p = pep[0]
-                if peptr[p].intersection(self.source_transcripts):
-                    del pepdict_nonsource[pep]
-                    del pepexpr[pep]
-                    rem.add(p)
-            for p in rem:
-                del peptr[p]
+            key = 'expressedTranscripts'
+            for pep in list(peptides[0].keys()):
+                if set(peptides[0][pep][key]).intersection(source_transcripts):
+                    del peptides[0][pep]
 
-        self.pepexpr = pepexpr
-        self.pepbs = pepbs
-
-        self.peptides = [pepdict_nonsource, pepdict_source]
+        self.peptides = peptides
+        self.source_transcripts = source_transcripts
 
 
     def _load_peptides(self, pfile):
@@ -195,36 +182,32 @@ class Dataset(object):
 
         pdct = pkl.load(open(pfile, 'rb'))
         peptides = [{}, {}]
-        # True == source peptide in transcript, else False
         tr_is_source = {k: False for k in self.tpm_dct.keys()}
-        peptr = {}
-        pepexpr = {}
-        pepbs = {}
+        #^ True == source peptide in transcript, else False
 
         for pep, pinfo in pdct.items():
             ix = 1 if pep in self.detected_peptides else 0
-            try:
-                mhc_scores = pinfo['netmhcpan']
-            except KeyError as e:
-                if 'U' not in pep:
-                    print(pep)
-                    raise e
-                else:
-                    continue
-            gene_entries = pinfo['genes']
+
+            if 'U' in pep:
+                continue
+            else:
+                assert 'netmhcpan' in pinfo
+
+            mhc_scores = pinfo['netmhcpan']
             mhc_scores = {al:mhc_scores[al] for al in mhc_scores if al in self.alleles}
-            bs_or_rank = min([sc[self.var] for sc in mhc_scores.values()])
-            if bs_or_rank < self.max_bs_or_rank:
+            bs = min([sc[self.var] for sc in mhc_scores.values()])
+
+            gene_entries = pinfo['genes']
+
+            if bs < self.max_bs_or_rank:
                 contexts = []
                 transcripts = []
-                tr_set = set()
                 for genes in gene_entries.values():
                     for g_cont in genes:
                         tr = [t for t in g_cont['transcriptID'] if t in self.tpm_dct]
                         if tr:
                             contexts.append(g_cont)
                             transcripts.append(tr)
-                            tr_set.update(tr)
                             for t in tr:
                                 # WARNING
                                 #   Not taking into account min_BS
@@ -232,44 +215,62 @@ class Dataset(object):
                                 #   but also not non-source, which are discarded anyway and never
                                 #   appear in the negative dataset
                                 tr_is_source[t] = tr_is_source[t] or (pep in self.detected_peptides)
-                if len(contexts) and len(contexts) <= self.max_contexts:
-                    peptr[pep] = tr_set
-                    if self.var == 'nM':
-                        pepbs[pep] = 1 - np.log(bs_or_rank) / np.log(50000)
-                    else:
-                        pepbs[pep] = bs_or_rank
 
+                if len(contexts) and len(contexts) <= self.max_contexts:
+                    bs = 1 - np.log(bs) / np.log(50000) if self.var == 'nM' else bs
                     for i, (g_cont, tr) in enumerate(zip(contexts, transcripts)):
                         exp = [self.tpm_dct[t] for t in tr]
                         if '!GA' not in g_cont['sequenceContext']:
-                            pepexpr[(pep, i)] = (exp, tr)
+                            peptides[ix][(pep, i)] = {}
+
+                            transid = g_cont['transcriptID']
+                            positions = g_cont['positionInTranscript']
+                            positions = [x for x, y in zip(positions, transid) if y in tr]
+
+                            seq = g_cont['sequenceContext']
+                            context_size = (len(seq) - len(pep[0])) / 2
+                            assert context_size == int(context_size)
+                            context_size = int(context_size)
+                            seq = seq[:context_size] + seq[-context_size:]
+                            gccontent = (seq.count('G') + seq.count('C')) / len(seq)
 
                             if self.step == 'createDS' or self.step == 'getDS':
-                                dct = {k: v for k, v in g_cont.items() if k != 'CAMAPScore'}
-                                peptides[ix][(pep, i)] = dct
-                                peptides[ix][(pep, i)]['expressedTranscripts'] = tr
-                                peptides[ix][(pep, i)]['expressedTranscriptsExpression'] = exp
-                                peptides[ix][(pep, i)]['bindingAffinity'] = pepbs[pep]
+                                for k in ['sequenceContext', 'geneID', 'geneName']:
+                                    peptides[ix][(pep, i)][k] = g_cont[k]
                                 peptides[ix][(pep, i)]['bindingAffinityMetric'] = self.var
 
-                            if self.step == 'evaluateDS' or self.step == 'getDS':
-                                dct = g_cont['CAMAPScore']
-                                dct = {k:dct[k] for k in dct if k.split('_')[0] == self.ann_method}
-                                for key in dct:
-                                    dct[key] = dct[key][self.context][self.ann_params][:self.max_replicates]
-                                if self.step == 'evaluateDS':
-                                    peptides[ix][(pep, i)] = dct
-                                else:
-                                    peptides[ix][(pep, i)]['CAMAPScore'] = dct
+                            peptides[ix][(pep, i)]['bindingAffinity'] = bs
+                            peptides[ix][(pep, i)]['expressedTranscripts'] = tr
+                            peptides[ix][(pep, i)]['transcriptsExpression'] = exp
+                            peptides[ix][(pep, i)]['transcriptsPosition'] = positions
+                            peptides[ix][(pep, i)]['sequenceGCContent'] = gccontent
 
-        return peptides[0], peptides[1], tr_is_source, peptr, pepexpr, pepbs
+                            if 'CAMAPScore' in g_cont and self.step == 'getDS':
+                                peptides[ix][(pep, i)]['CAMAPMethod'] = self.ann_method
+                                peptides[ix][(pep, i)]['CAMAPParameters'] = self.ann_params
+                                peptides[ix][(pep, i)]['CAMAPContext'] = self.context
+
+                            if 'CAMAPScore' in g_cont and self.step in ['evaluateDS', 'getDS']:
+                                dct = g_cont['CAMAPScore']
+                                camap_score = None
+                                camap_score_shuffle = None
+
+                                for k, v in dct.items():
+                                    c, a, m = self.context, self.ann_params, self.max_replicates
+                                    if k == self.ann_method:
+                                        camap_score = dct[k][c][a][:m]
+                                    elif k == self.ann_method + '_Shuffle':
+                                        camap_score_shuffle = dct[k][c][a][:m]
+
+                                peptides[ix][(pep, i)]['CAMAPScore'] = camap_score
+                                peptides[ix][(pep, i)]['CAMAPScoreShuffle'] = camap_score_shuffle
+
+        return peptides, tr_is_source
 
 
     def clear_unused(self):
         print('Clearing unused data')
         try:
-            del self.pepbs
-            del self.pepexpr
             del self.peptides
         except AttributeError:
             print("Some attributes were not cleared because they didn't exist")
@@ -284,19 +285,20 @@ class TrainingDataset(Dataset):
         #debug = False
         ratio = ratio if not ratio is None else np.inf
 
-        peplist_nonsource = list(self.peptides[0].keys())
-        peplist_source = list(self.peptides[1].keys())
+        peplist_nonsource, peplist_source = list(self.peptides[0].keys()), list(self.peptides[1].keys())
         print(len(peplist_source), len(peplist_nonsource))
 
         if copy_distribution:
             if same_tpm:
-                ns_exp = [np.mean(self.pepexpr[pep][0]) for pep in peplist_nonsource]
+                key = 'transcriptsExpression'
+                ns_exp = [np.mean(self.peptides[0][pep][key]) for pep in peplist_nonsource]
                 ns_exp = pd.Series(np.log2(np.array(ns_exp)))
-                s_exp = [np.mean(self.pepexpr[pep][0]) for pep in peplist_source]
+                s_exp = [np.mean(self.peptides[1][pep][key]) for pep in peplist_source]
                 s_exp = np.log2(np.array(s_exp))
             elif same_bs:
-                ns_exp = pd.Series(np.array([self.pepbs[pep[0]] for pep in peplist_nonsource]))
-                s_exp = np.array([self.pepbs[pep[0]] for pep in peplist_source])
+                key = 'bindingAffinity'
+                ns_exp = pd.Series(np.array([self.peptides[0][pep][key] for pep in peplist_nonsource]))
+                s_exp = np.array([self.peptides[1][pep][key] for pep in peplist_source])
                 max_val = max(max(ns_exp), max(s_exp))
                 ns_exp = ns_exp/max_val*30-15
                 s_exp = s_exp/max_val*30-15
@@ -514,7 +516,7 @@ class RegressionDataset(Dataset):
         try:
             n_replicates = len(self.df_dictionnaries[0])
         except AttributeError:
-            self._organize_data()
+            self.df_dictionnaries = self._organize_data(self.peptides)
             n_replicates = len(self.df_dictionnaries[0])
 
         if not hasattr(self, 'peptides_train'):
@@ -548,12 +550,13 @@ class RegressionDataset(Dataset):
         self.metadata = [y for x in metadata for y in x]
 
 
-    def _organize_data(self):
-        # Organize data
-
+    @staticmethod
+    def organize_data(all_peptides):
         df_dictionnaries = [[], []]
 
         for sns in [0, 1]:
+            peptides = all_peptides[sns]
+
             df_dct = {
                 'Peptide': [],
                 'BS': [],
@@ -562,20 +565,41 @@ class RegressionDataset(Dataset):
                 'CAMAPShuff': defaultdict(list)
                 }
 
-            for pep in self.peptides[sns]:
-                p = pep[0]
-                expressions = self.pepexpr[pep][0]
-                bs_score = self.pepbs[p]
-                ann_score = self.peptides[sns][pep][self.ann_method]
-                ann_shuf_score = self.peptides[sns][pep][self.ann_method + '_Shuffle']
-                for e in expressions:
-                    df_dct['Peptide'].append(p)
-                    df_dct['BS'].append(bs_score)
+            df_dct = defaultdict(list, df_dct)
+
+            for pep in peptides.keys():
+                dct = peptides[pep]
+
+                expressions = dct['transcriptsExpression']
+                try:
+                    transcripts = dct['expressedTranscripts']
+                except KeyError:
+                    transcripts = [None]*len(expressions)
+                try:
+                    positions = dct['transcriptsPosition']
+                except KeyError:
+                    positions = [None]*len(expressions)
+
+                for e, t, p in zip(expressions, transcripts, positions):
+                    df_dct['Peptide'].append(pep[0])
+                    df_dct['BS'].append(dct['bindingAffinity'])
                     df_dct['TPM'].append(np.log10(e))
-                    for i, v in enumerate(ann_score):
+
+                    for i, v in enumerate(dct['CAMAPScore']):
                         df_dct['CAMAP'][i].append(v)
-                    for i, v in enumerate(ann_shuf_score):
+                    for i, v in enumerate(dct['CAMAPScoreShuffle']):
                         df_dct['CAMAPShuff'][i].append(v)
+
+                    if 'expressedTranscripts' in dct:
+                        df_dct['Transcript'].append(t)
+                    if 'transcriptsPosition' in dct:
+                        df_dct['Position'].append(p)
+                    if 'sequenceContext' in dct:
+                        df_dct['ContextSequence'].append(dct['sequenceContext'])
+                    if 'sequenceGCContent' in dct:
+                        df_dct['GCContent'].append(dct['sequenceGCContent'])
+
+            df_dct = dict(df_dct)
 
             df_dct['CAMAP'] = [df_dct['CAMAP'][k] for k in sorted(df_dct['CAMAP'])]
             df_dct['CAMAPShuff'] = [df_dct['CAMAPShuff'][k] for k in sorted(df_dct['CAMAPShuff'])]
@@ -583,9 +607,8 @@ class RegressionDataset(Dataset):
             assert len(df_dct['CAMAP']) == len(df_dct['CAMAPShuff'])
             n_replicates = len(df_dct['CAMAP'])
 
-            df_dct['Peptide'] = [df_dct['Peptide']] * n_replicates
-            df_dct['BS'] = [df_dct['BS']] * n_replicates
-            df_dct['TPM'] = [df_dct['TPM']] * n_replicates
+            for k in [x for x in df_dct.keys() if x != 'CAMAP' and x != 'CAMAPShuff']:
+                df_dct[k] = [df_dct[k]] * n_replicates
 
             for r in range(n_replicates):
                 subdct = {c:df_dct[c][r] for c in df_dct}
@@ -604,7 +627,8 @@ class RegressionDataset(Dataset):
                 df_dictionnaries[empty].append(df_dct)
 
         print('Peptide data organized in replicates')
-        self.df_dictionnaries = df_dictionnaries
+
+        return df_dictionnaries
 
 
     @classmethod
