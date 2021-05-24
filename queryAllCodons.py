@@ -7,6 +7,7 @@ import math
 import sys
 import functools
 import argparse
+import gzip
 
 
 def get_all_genes(genome):
@@ -21,6 +22,7 @@ def cod_in_tr(genome, gene_list):
     from pyGeno.Gene import Gene
     from pyGeno.Protein import Protein
     import pyGeno.tools.UsefulFunctions as uf
+
     ref = Genome(name=genome)
 
     def get_codons(gid):
@@ -33,6 +35,7 @@ def cod_in_tr(genome, gene_list):
             codpos = [x for e in transcript.exons for x in range(e.start, e.end)][cds_start:cds_end]
             tseq = transcript.cDNA
             pseq = transcript.protein.sequence
+            tid = transcript.id
             try:
                 assert '*' not in pseq[:-1] #-> see queryAllProteome to know why it is commented
             except AssertionError:
@@ -43,18 +46,22 @@ def cod_in_tr(genome, gene_list):
                 positions = tuple(codpos[:3])
                 if len(cod) == 3:
                     if positions not in seen_positions:
-                        yield cod
+                        yield cod, tid
                         seen_positions.add(positions)
                 tseq = tseq[3:]
                 codpos = codpos[3:]
 
+    codonlist = sorted(list(uf.translTable['default'].keys()))
     codict = defaultdict(int)
+    trdict = defaultdict(lambda: {x: 0 for x in codonlist})
     for gene_id in gene_list:
-        for codon in get_codons(gene_id):
+        for codon, trid in get_codons(gene_id):
             codict[codon] += 1
+            trdict[trid][codon] += 1
     codict = dict(codict)  # lambda: defaultdict -> PicklingError: Can't pickle <type 'function'>
+    trdict = dict(trdict)
 
-    return codict
+    return codict, trdict
 
 
 def chunk_up(list_to_divide, div):
@@ -94,12 +101,17 @@ def main():
         futures.append(future)
 
     codon_dict = defaultdict(int)
+    transcript_dict = {}
     completed = 0
     checkpoint = 0
     for future in as_completed(futures):
         completed += 1
-        for codon, count in future.result().items():
+        codict, trdict = future.result()
+        for codon, count in codict.items():
             codon_dict[codon] += count
+        for trscp, trcodict in trdict.items():
+            assert trscp not in transcript_dict
+            transcript_dict[trscp] = trcodict
         pcomp = completed/float(n_jobs_real)*100
         pdone = CompletedTasks/float(len(all_genes))*100
         sys.stderr.write('Added to dictionary: %.1f %%  Completed: %.1f %%\n' % (pcomp, pdone))
@@ -115,7 +127,16 @@ def main():
 
     outfile = 'output/codonCounts/%s.tsv' % genome
     with open(outfile, 'w') as f:
-        f.write('\n'.join(['%s\t%d' % (codon, count) for codon, count in codon_dict.items()]) + '\n')
+        ftxt = ['%s\t%d' % (codon, count) for codon, count in codon_dict.items()]
+        f.write('\n'.join(ftxt) + '\n')
+
+    outfile = 'output/codonCounts/%s.trscp.tsv.gz' % genome
+    with gzip.open(outfile, 'wb') as f:
+        ftxt = list()
+        for trscp, codict in transcript_dict.items():
+            for codon, count in codict.items():
+                ftxt.append('%s\t%s\t%d' % (trscp, codon, count))
+        f.write(str.encode('\n'.join(ftxt) + '\n'))
 
 if __name__ == '__main__':
     main()

@@ -83,7 +83,20 @@ class Dataset(object):
         with open(expression_file, 'r') as f:
             data = [l.strip().split('\t') for l in f.readlines()]
         self.tpm_dct = {l[0]:float(l[1]) for l in data}
-        #self.tpm_dct = {x:y for x, y in self.tpm_dct.items() if float(y)>0.1}
+
+        count_path = os.path.join(self.output_folder, 'codonCounts/%s.trscp.tsv.gz' % self.genome)
+        try:
+            df = pd.read_csv(count_path, sep='\t', names=['Transcript', 'Codon', 'Count'])
+            df = df[df.Codon != '!GA']
+            expdct = {'Transcript': list(self.tpm_dct.keys()), 'TPM': list(self.tpm_dct.values())}
+            dfexp = pd.DataFrame(expdct)
+            df = df.merge(dfexp, on='Transcript', how='left')
+            df['WeightedCount'] = df.TPM * df.Count
+            df = df[df.WeightedCount > 0]
+            self.tpm_codon_dct = df.groupby('Codon').WeightedCount.sum().to_dict()
+        except FileNotFoundError:
+            sys.stderr.write('WARNING: File not found. => ' + count_path + '\n')
+            self.tpm_codon_dct = None
 
 
     def load_peptides_options(self,
@@ -94,6 +107,7 @@ class Dataset(object):
             ann_method='Adam',
             ann_params='e500pep9t5',
             max_replicates=None,
+            peptide_lengths=[8, 9, 10, 11],
             remove_neg_source=True
         ):
 
@@ -118,6 +132,15 @@ class Dataset(object):
         else:
             assert var in ['nM', 'Rank', 'Rank_NP']
         self.var = var
+
+        peplens = peptide_lengths if type(peptide_lengths) == list else [peptide_lengths]
+        pepfiles = []
+        for f in self.pepfiles:
+            for peplen in peplens:
+                if int(os.path.basename(f).split('_')[1][1:].replace('.pkl', '')) == peplen:
+                    pepfiles.append(f)
+                    break
+        self.pepfiles = pepfiles
 
 
     def load_peptides(self):

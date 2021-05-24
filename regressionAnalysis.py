@@ -11,7 +11,7 @@ from camaptools.EnhancedFutures import EnhancedProcessPoolExecutor, EnhancedMPIP
 OUTPUT_FOLDER = "./output"
 
 
-def add_blcl_peptide_lists(dataset):
+def get_blcl_peptides():
     train = []
     test = []
 
@@ -19,16 +19,16 @@ def add_blcl_peptide_lists(dataset):
         train.extend([x.strip() for x in f.readlines() if x.strip()])
     with open('../CAMAP/peptides_dataset_162/peptides.nonsource.train.txt', 'r') as f:
         train.extend([x.strip() for x in f.readlines() if x.strip()])
+    with open('../CAMAP/peptides_dataset_162/peptides.source.validation.txt', 'r') as f:
+        train.extend([x.strip() for x in f.readlines() if x.strip()])
+    with open('../CAMAP/peptides_dataset_162/peptides.nonsource.validation.txt', 'r') as f:
+        train.extend([x.strip() for x in f.readlines() if x.strip()])
     with open('../CAMAP/peptides_dataset_162/peptides.source.test.txt', 'r') as f:
         test.extend([x.strip() for x in f.readlines() if x.strip()])
     with open('../CAMAP/peptides_dataset_162/peptides.nonsource.test.txt', 'r') as f:
         test.extend([x.strip() for x in f.readlines() if x.strip()])
-    with open('../CAMAP/peptides_dataset_162/peptides.source.validation.txt', 'r') as f:
-        test.extend([x.strip() for x in f.readlines() if x.strip()])
-    with open('../CAMAP/peptides_dataset_162/peptides.nonsource.validation.txt', 'r') as f:
-        test.extend([x.strip() for x in f.readlines() if x.strip()])
 
-    dataset.construct_datasets_options(train, test)
+    return train, test
 
 
 def main():
@@ -101,12 +101,11 @@ def main():
 
     datasets = [RegressionDataset(g, d, context) for g, d in genome_datasets]
 
-    ix_blcl = None
+    train, test = get_blcl_peptides()
+
     for i, (g, d) in enumerate(genome_datasets):
         if d == 'BLCL':
-            ix_blcl = i
-    if ix_blcl is not None:
-        add_blcl_peptide_lists(datasets[ix_blcl])
+            datasets[i].construct_datasets_options(train, test)
 
     rem = RegressionMetaManager(datasets, out_dir, workers, Executor)
     rem.set_load_peptides_options(

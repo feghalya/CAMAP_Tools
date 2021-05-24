@@ -28,6 +28,6 @@ module purge
 mkdir -p log
 
 runPBS GRCh37.75
-runPBS GRCm38.78
-runPBS GRCh38.98
-runPBS GRCm38.98
+#runPBS GRCm38.78
+#runPBS GRCh38.98
+#runPBS GRCm38.98

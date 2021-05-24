@@ -61,11 +61,13 @@ class CodonShuffleEmbeddings(CodonEmbeddings):
             codon_frequencies[aa] = {'codons': codons, 'cumweights': cumweights}
         self.codon_frequencies = codon_frequencies
 
-    def encode(self, seq, seed=0):
+    def encode(self, seq, seed=None):
         assert len(seq)%3 == 0
+        if seed is None:
+            seed = random.randint(0, 1e9)
         X = []
         for c in range(0, len(seq), 3):
-            seed += 1
+            seed += 1  # WARNING: Setting seeds this way is not a good idea
             codon = seq[c:c+3]
             freqs = self.codon_frequencies[codonTable[codon]]
             random.seed(seed)
