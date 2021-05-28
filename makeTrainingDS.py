@@ -44,6 +44,7 @@ def main():
     parser.add_argument("-r", "--bs_or_rank", help="max binding score or rank (if < 25)", type=int, default=1250)
     parser.add_argument("-m", "--ncontexts", help="max contexts permitted to keep peptide", type=int, default=None)
     parser.add_argument("-t", "--ratio", help="non-source to source ratio", type=int, default=None)
+    parser.add_argument("-x", "--samegc", help="sample non-source keeping GC content proportions", action='store_true')
     parser.add_argument("-y", "--sametpm", help="sample non-source keeping TPM proportions", action='store_true')
     parser.add_argument("-z", "--samebs", help="sample non-source keeping nM proportions", action='store_true')
     parser.add_argument("--no-codon", help="do not encode codons", action='store_false')
@@ -65,6 +66,7 @@ def main():
     ratio = args['ratio']
     same_tpm = args['sametpm']
     same_bs = args['samebs']
+    same_gc = args['samegc']
     codon = args['no_codon']
     shuffle = args['no_shuffle']
     aa = args['no_aa']
@@ -85,9 +87,9 @@ def main():
     dat.load_peptides()
 
     for seed in seeds:
-        dat.split_dataset(ratio=ratio, same_tpm=same_tpm, same_bs=same_bs, seed=seed)
+        dat.split_dataset(ratio=ratio, same_tpm=same_tpm, same_bs=same_bs, same_gc=same_gc, seed=seed)
         dat.encode_peptides(seed=seed, codon=codon, shuffle=shuffle, aa=aa)
-        ds_name = '%s_%s_padding%d_maxBS%d_maxContexts%d_ratio%d_%s%s%sseed%d' % (
+        ds_name = '%s_%s_padding%d_maxBS%d_maxContexts%d_ratio%d_%s%s%s%sseed%d' % (
             ds,
             genome,
             context_len,
@@ -97,6 +99,7 @@ def main():
             'peplen%s_' % peplen if peplen else '',
             'sameTPM_' if same_tpm else '',
             'sameBS_' if same_bs else '',
+            'sameGC_' if same_gc else '',
             seed
         )
         write_to_disk(dat, ds_name, meta)

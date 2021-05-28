@@ -36,10 +36,11 @@ context=162
 epochs=4000
 
 datasets=
-datasets=$datasets" BLCL_GRCh37.75_padding162_maxBS500_maxContexts10_ratio5_peplen9@pep9t5"
+#datasets=$datasets" BLCL_GRCh37.75_padding162_maxBS500_maxContexts10_ratio5_peplen9@pep9t5"
+datasets=$datasets" BLCL_GRCh37.75_padding162_maxBS500_maxContexts10_ratio5_peplen9_sameGC@pep9t5x"
 #datasets=$datasets" BLCL_GRCh37.75_padding162_maxBS500_maxContexts10_ratio5_peplen9_sameTPM@pep9t5y"
-datasets=$datasets" BLCL_GRCh37.75_padding162_maxBS500_maxContexts3_ratio5_peplen9@pep9t5m3"
-datasets=$datasets" BLCL_GRCh37.75_padding162_maxBS500_maxContexts0_ratio5_peplen9@pep9t5mINF"
+#datasets=$datasets" BLCL_GRCh37.75_padding162_maxBS500_maxContexts3_ratio5_peplen9@pep9t5m3"
+#datasets=$datasets" BLCL_GRCh37.75_padding162_maxBS500_maxContexts0_ratio5_peplen9@pep9t5mINF"
 #datasets=$datasets" BLCL_GRCh38.98_padding162_maxBS500_maxContexts10_ratio5_peplen9@pep9t5"
 #datasets=$datasets" BLCL_GRCh38.98_padding162_maxBS500_maxContexts10_ratio5_peplen9_sameTPM@pep9t5y"
 #datasets=$datasets" BLCL_GRCh38.98_padding162_maxBS500_maxContexts10_ratio25_peplen9@pep9t25"

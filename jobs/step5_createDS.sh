@@ -35,9 +35,13 @@ dataset=BLCL
 #job_name=${genome}_${dataset}_p9_t5_mINF
 #runPBS "$job_cmd" "$job_name"
 
-job_cmd="./makeTrainingDS.py -g $genome -d $dataset -s 12 -c 162 -r 500 -m 10 -t 5 -p 9 -y"
-job_name=${genome}_${dataset}_p9_t5_y
+job_cmd="./makeTrainingDS.py -g $genome -d $dataset -s 12 -c 162 -r 500 -m 10 -t 5 -p 9 -x"
+job_name=${genome}_${dataset}_p9_t5_x
 runPBS "$job_cmd" "$job_name"
+
+#job_cmd="./makeTrainingDS.py -g $genome -d $dataset -s 12 -c 162 -r 500 -m 10 -t 5 -p 9 -y"
+#job_name=${genome}_${dataset}_p9_t5_y
+#runPBS "$job_cmd" "$job_name"
 
 #job_cmd="./makeTrainingDS.py -g $genome -d $dataset -s 12 -c 162 -r 500 -m 10 -t 5 -p 9 -z"
 #job_name=${genome}_${dataset}_p9_t5_z
@@ -49,10 +53,6 @@ runPBS "$job_cmd" "$job_name"
 
 #job_cmd="./makeTrainingDS.py -g $genome -d $dataset -s 12 -c 162 -r 500 -m 10 -t 25 -p 9"
 #job_name=${genome}_${dataset}_p9_t25
-#runPBS "$job_cmd" "$job_name"
-#
-#job_cmd="./makeTrainingDS.py -g $genome -d $dataset -s 12 -c 162 -r 500 -m 10 -t 25 -p 9 -y"
-#job_name=${genome}_${dataset}_p9_t25_y
 #runPBS "$job_cmd" "$job_name"
 #
 #job_cmd="./makeTrainingDS.py -g $genome -d $dataset -s 12 -c 162 -r 500 -m 10 -t 5"

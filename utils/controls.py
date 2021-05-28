@@ -166,13 +166,13 @@ camap_scores = []
 classes = []
 transcripts = []
 for pep in dat.peptides[1]:
-    for tr in dat.pepexpr[pep][1]:
+    for tr in dat.peptr[pep]:
         peptides.append(pep[0])
         camap_scores.append(dat.peptides[1][pep]['SGD'][6])
         classes.append('Source')
         transcripts.append(tr)
 for pep in dat.peptides[0]:
-    for tr in dat.pepexpr[pep][1]:
+    for tr in dat.peptr[pep]:
         peptides.append(pep[0])
         camap_scores.append(dat.peptides[0][pep]['SGD'][6])
         classes.append('NonSource')

@@ -228,14 +228,14 @@ class Dataset(object):
                             positions = [x for x, y in zip(positions, transid) if y in tr]
 
                             seq = g_cont['sequenceContext']
-                            context_size = (len(seq) - len(pep[0])) / 2
+                            context_size = (len(seq) - len(pep)*3) / 2
                             assert context_size == int(context_size)
                             context_size = int(context_size)
                             seq = seq[:context_size] + seq[-context_size:]
                             gccontent = (seq.count('G') + seq.count('C')) / len(seq)
 
                             if self.step == 'createDS' or self.step == 'getDS':
-                                for k in ['sequenceContext', 'geneID', 'geneName']:
+                                for k in ['peptide', 'sequenceContext', 'geneID', 'geneName']:
                                     peptides[ix][(pep, i)][k] = g_cont[k]
                                 peptides[ix][(pep, i)]['bindingAffinityMetric'] = self.var
 
@@ -278,17 +278,24 @@ class Dataset(object):
 
 
 class TrainingDataset(Dataset):
-    def split_dataset(self, ratio=5, same_tpm=False, same_bs=False, seed=0):
+    def split_dataset(self, ratio=5, same_tpm=False, same_bs=False, same_gc=False, seed=None):
         print('Splitting dataset')
-        assert sum([same_tpm, same_bs]) < 2
-        copy_distribution = same_tpm or same_bs if not ratio is None else False
+
+        assert sum([same_tpm, same_bs, same_gc]) < 2
+
+        if seed is None:
+            seed = random.randint(0, 1e9)
+
+        do_binning = same_tpm or same_bs or same_gc if ratio is not None else False
         #debug = False
         ratio = ratio if not ratio is None else np.inf
 
         peplist_nonsource, peplist_source = list(self.peptides[0].keys()), list(self.peptides[1].keys())
         print(len(peplist_source), len(peplist_nonsource))
 
-        if copy_distribution:
+        if do_binning:
+            start, end = -10, 10
+
             if same_tpm:
                 key = 'transcriptsExpression'
                 ns_exp = [np.mean(self.peptides[0][pep][key]) for pep in peplist_nonsource]
@@ -302,8 +309,12 @@ class TrainingDataset(Dataset):
                 max_val = max(max(ns_exp), max(s_exp))
                 ns_exp = ns_exp/max_val*30-15
                 s_exp = s_exp/max_val*30-15
-
-            start, end = -10, 10
+            elif same_gc:
+                key = 'sequenceGCContent'
+                ns_exp = pd.Series([self.peptides[0][pep][key] for pep in peplist_nonsource])
+                s_exp = np.array([self.peptides[1][pep][key] for pep in peplist_source])
+                ns_exp = ns_exp*30-15
+                s_exp = s_exp*30-15
 
             l = [-np.inf] + list(range(start, end)) + [np.inf]
             bins = []
@@ -312,6 +323,7 @@ class TrainingDataset(Dataset):
                     bins.append((l[x], l[x+1]))
             except IndexError:
                 pass
+
             numtoix = {x: xi for xi, x in enumerate(range(start, end+1))}
             weights = [len(s_exp[(s_exp >= i) & (s_exp < j)])/len(s_exp) for i, j in bins]
             getbin = lambda x: bins[numtoix[max(start, min(math.ceil(x), end))]]
@@ -364,7 +376,7 @@ class TrainingDataset(Dataset):
         )
 
         #if debug:
-        #    if copy_distribution:
+        #    if do_binning:
         #        nr = len(dct_pep['test'][0])/len(unfiltered_nonsource)
         #        _, dct_pep['test'][0] = train_test_split(
         #            unfiltered_nonsource,
@@ -516,7 +528,7 @@ class RegressionDataset(Dataset):
         try:
             n_replicates = len(self.df_dictionnaries[0])
         except AttributeError:
-            self.df_dictionnaries = self._organize_data(self.peptides)
+            self.df_dictionnaries = self.organize_data(self.peptides)
             n_replicates = len(self.df_dictionnaries[0])
 
         if not hasattr(self, 'peptides_train'):
@@ -590,12 +602,12 @@ class RegressionDataset(Dataset):
                     for i, v in enumerate(dct['CAMAPScoreShuffle']):
                         df_dct['CAMAPShuff'][i].append(v)
 
-                    if 'expressedTranscripts' in dct:
-                        df_dct['Transcript'].append(t)
-                    if 'transcriptsPosition' in dct:
-                        df_dct['Position'].append(p)
-                    if 'sequenceContext' in dct:
-                        df_dct['ContextSequence'].append(dct['sequenceContext'])
+                    #if 'expressedTranscripts' in dct:
+                    #    df_dct['Transcript'].append(t)
+                    #if 'transcriptsPosition' in dct:
+                    #    df_dct['Position'].append(p)
+                    #if 'sequenceContext' in dct:
+                    #    df_dct['ContextSequence'].append(dct['sequenceContext'])
                     if 'sequenceGCContent' in dct:
                         df_dct['GCContent'].append(dct['sequenceGCContent'])
 
@@ -702,7 +714,11 @@ class RegressionDataset(Dataset):
             for e in sorted(ix_switch, reverse=True):
                 ix_train.append(ix_test.pop(e))
 
-            ix = ix.drop(ix_train + ix_test, level='Peptide')
+            # If ix_train and ix_test are empty, do nothing
+            try:
+                ix = ix.drop(ix_train + ix_test, level='Peptide')
+            except KeyError:
+                pass
 
             # Split dataset into train and test
             classes = ix.get_level_values('Class')

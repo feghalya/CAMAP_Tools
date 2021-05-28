@@ -12,10 +12,10 @@ import os
 from camaptools.MLP import Model, load_models
 
 
-MODELS = load_models(algorithms=['SGD', 'SGD_Shuffle', 'SGD_AminoAcid'])
+MODELS = load_models(algorithms=['SGD', 'SGD_Shuffle', 'SGD_AminoAcid', 'SGD_nobias', 'SGD_nobias_Shuffle'])
 
 
-def calc_auc(seed, homology=10, copy='', embeddings='original', dataset='BLCL'):
+def calc_auc(seed, homology=10, copy='', embeddings='original', dataset='BLCL', bias=True):
     if homology == 10:
         suffix_hom = ''
         ncont = 10
@@ -35,15 +35,18 @@ def calc_auc(seed, homology=10, copy='', embeddings='original', dataset='BLCL'):
     elif copy == 'BS':
         suffix_bin = 'z'
         copy_dist = '_sameBS'
+    elif copy == 'GC':
+        suffix_bin = 'x'
+        copy_dist = '_sameGC'
     else:
         suffix_bin = ''
         copy_dist = ''
 
     if embeddings == 'original':
-        algorithm = 'SGD'
+        algorithm = 'SGD' if bias else 'SGD_nobias'
         embeddings = 'CodonEmbeddings'
     elif embeddings == 'shuffle':
-        algorithm = 'SGD_Shuffle'
+        algorithm = 'SGD_Shuffle' if bias else 'SGD_nobias_Shuffle'
         embeddings = 'CodonShuffleEmbeddings'
     elif embeddings == 'aa':
         algorithm = 'SGD_AminoAcid'
@@ -128,6 +131,16 @@ def run(dat):
         sametpm = [ex.submit(calc_auc, seed, hom, copy, 'original', dat) for seed in range(12)]
         sametpm_s = [ex.submit(calc_auc, seed, hom, copy, 'shuffle', dat) for seed in range(12)]
 
+        hom = 10
+        copy = 'GC'
+        samegc = [ex.submit(calc_auc, seed, hom, copy, 'original', dat) for seed in range(12)]
+        samegc_s = [ex.submit(calc_auc, seed, hom, copy, 'shuffle', dat) for seed in range(12)]
+
+        hom = 10
+        copy = ''
+        nobias = [ex.submit(calc_auc, seed, hom, copy, 'original', dat, False) for seed in range(12)]
+        nobias_s = [ex.submit(calc_auc, seed, hom, copy, 'shuffle', dat, False) for seed in range(12)]
+
     # ** Shuffling **
 
     labels = ['C10']*12 + ['C10Shuffle']*12 + ['C10AminoAcid']*12
@@ -180,11 +193,11 @@ def run(dat):
 
     # ** Binning **
 
-    labels = ['C10']*12 + ['C10sameTPM']*12 + ['C10sameBS']*12
+    labels = ['C10']*12 + ['C10sameTPM']*12 + ['C10sameBS']*12 + ['C10sameGC']*12
     labels = labels + [l + 'Shuffle' for l in labels]
-    seeds = [x+1 for x in range(12)]*6
+    seeds = [x+1 for x in range(12)]*8
 
-    outputs = [c10, sametpm, samebs, c10s, sametpm_s, samebs_s]
+    outputs = [c10, sametpm, samebs, samegc, c10s, sametpm_s, samebs_s, samegc_s]
     results = [[f.result() for f in x] for x in outputs]
     results = [tuple(zip(*x)) for x in results]
     aucs, test_sizes, train_sizes, validation_sizes = tuple(zip(*results))
@@ -203,33 +216,63 @@ def run(dat):
         }).set_index('Label')
     df_binning['Dataset'] = dat
 
-    return df_homology, df_binning, df_shuffling
+    # ** Bias **
+
+    labels = ['C10']*12 + ['C10NoBias']*12
+    labels = labels + [l + 'Shuffle' for l in labels]
+    seeds = [x+1 for x in range(12)]*4
+
+    outputs = [c10, nobias, c10s, nobias_s]
+    results = [[f.result() for f in x] for x in outputs]
+    results = [tuple(zip(*x)) for x in results]
+    aucs, test_sizes, train_sizes, validation_sizes = tuple(zip(*results))
+    aucs = [y for x in aucs for y in x]
+    test_sizes = [y for x in test_sizes for y in x]
+    train_sizes = [y for x in train_sizes for y in x]
+    validation_sizes = [y for x in validation_sizes for y in x]
+
+    df_bias = pd.DataFrame({
+        "Label": labels,
+        "Seed": seeds,
+        "AUC": aucs,
+        "TestSize": test_sizes,
+        "TrainSize": train_sizes,
+        "ValidationSize": validation_sizes
+        }).set_index('Label')
+    df_bias['Dataset'] = dat
+
+    return df_homology, df_binning, df_shuffling, df_bias
 
 
 homologies = []
 binnings = []
 shufflings = []
+bias = []
 for dataset in ['BLCL', 'B721', 'PBMCs', 'EL4', 'CT26']:
     print('Running', dataset)
-    df1, df2, df3 = run(dataset)
+    df1, df2, df3, df4 = run(dataset)
     homologies.append(df1)
     binnings.append(df2)
     shufflings.append(df3)
+    bias.append(df4)
 
 homologies = pd.concat(homologies, axis=0)
 binnings = pd.concat(binnings, axis=0)
 shufflings = pd.concat(shufflings, axis=0)
+bias = pd.concat(bias, axis=0)
 
 os.makedirs('revisions', exist_ok=True)
 
 homologies[homologies.Dataset == 'BLCL'].to_csv('revisions/homology.tsv', sep='\t', float_format='%g')
 binnings[binnings.Dataset == 'BLCL'].to_csv('revisions/binning.tsv', sep='\t', float_format='%g')
 shufflings[shufflings.Dataset == 'BLCL'].to_csv('revisions/shuffling.tsv', sep='\t', float_format='%g')
+bias[bias.Dataset == 'BLCL'].to_csv('revisions/bias.tsv', sep='\t', float_format='%g')
 #^ only compare original vs shuffle
 
 homologies[homologies.Dataset != 'BLCL'].to_csv('revisions/homology.valid.tsv', sep='\t', float_format='%g')
 binnings[binnings.Dataset != 'BLCL'].to_csv('revisions/binning.valid.tsv', sep='\t', float_format='%g')
 shufflings[shufflings.Dataset != 'BLCL'].to_csv('revisions/shuffling.valid.tsv', sep='\t', float_format='%g')
+bias[bias.Dataset != 'BLCL'].to_csv('revisions/bias.valid.tsv', sep='\t', float_format='%g')
 #^ can compare strategies (ex: C10 vs CINF)
 
 

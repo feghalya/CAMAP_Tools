@@ -25,8 +25,9 @@ def load_models(context=162, algorithms=None, parameters=None):
 
     models = {context: load()}
     for method, method_dct in models[context].items():
+        bias = False if 'nobias' in method else True
         for params, model_list in method_dct.items():
-            method_dct[params] = [Model(m, context, 'cpu') for m in model_list]
+            method_dct[params] = [Model(m, context, 'cpu', bias) for m in model_list]
 
     return model_names, models
 
@@ -99,11 +100,11 @@ class AAEmbeddings(object):
 
 
 class Model(CAMAP.Classifier):
-    def __init__(self, model, context, device='cpu'):
+    def __init__(self, model, context, device='cpu', bias=True):
         self.context = context
         self.padding = int(self.context // 3)
         input_len = self.padding * 2
-        super(Model, self).__init__(input_len)
+        super(Model, self).__init__(input_len, bias)
         self.encoding = CodonEmbeddings()
         CAMAP.load_model(model, self, device)
 
