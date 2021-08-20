@@ -644,22 +644,15 @@ class RegressionDataset(Dataset):
 
 
     @classmethod
-    def _create_preprocess_split(cls, seed, nonsource, source, peptides_train, peptides_test):  #executor, workers):
+    def _create_preprocess_split(cls, seed, nonsource, source, peptides_train, peptides_test):
         print('doing %d' % seed)
         metadata = []
         datasets = []
-        if True:
-        #with executor(max_workers=workers, use_threads=True) as ex:
-            #procs = []
-            res = cls._preprocess_df(cls._create_df(nonsource, source))
-            for df, subname in res:
-                dat = cls._split_and_normalize_df(df, seed, peptides_train, peptides_test)
-                metadata.append((seed, subname))
-                datasets.append(dat)
-                #p = ex.submit(cls._split_and_normalize_df, df, seed)
-                #procs.append(p)
-            #print(ex)
-        #datasets = [p.result() for p in procs]
+        res = cls._preprocess_df(cls._create_df(nonsource, source))
+        for df, subname in res:
+            dat = cls._split_and_normalize_df(df, seed, peptides_train, peptides_test)
+            metadata.append((seed, subname))
+            datasets.append(dat)
         print('done %d' % seed)
         return datasets, metadata
 
@@ -682,74 +675,73 @@ class RegressionDataset(Dataset):
     @staticmethod
     def _split_and_normalize_df(df, seed, ix_train=[], ix_test=[]):
         #try:
-        if True:
-            ix = df.index.drop_duplicates()
+        ix = df.index.drop_duplicates()
 
-            # Pre-arrange train and test entries if specified
-            ix_train = list(set(ix_train))
-            ix_test = list(set(ix_test))
+        # Pre-arrange train and test entries if specified
+        ix_train = list(set(ix_train))
+        ix_test = list(set(ix_test))
 
-            ix_train = [x for x in ix_train if x in df.index]
-            ix_test = [x for x in ix_test if x in df.index]
+        ix_train = [x for x in ix_train if x in df.index]
+        ix_test = [x for x in ix_test if x in df.index]
 
-            nswitch = 0
-            nremove = 0
-            split_ratio = 0.3/0.7
-            if len(ix_train)*split_ratio > len(ix_test):
-                nremove = len(ix_train) - int(len(ix_test)/split_ratio)
-            elif len(ix_train)*split_ratio < len(ix_test):
-                nswitch = int((len(ix_test) - len(ix_train)*split_ratio) / (1 + split_ratio))
+        nswitch = 0
+        nremove = 0
+        split_ratio = 0.3/0.7
+        if len(ix_train)*split_ratio > len(ix_test):
+            nremove = len(ix_train) - int(len(ix_test)/split_ratio)
+        elif len(ix_train)*split_ratio < len(ix_test):
+            nswitch = int((len(ix_test) - len(ix_train)*split_ratio) / (1 + split_ratio))
 
-            # NOTE: This method does not preserve class proportions
-            random.seed = seed
-            ix_remove = random.sample(range(len(ix_train)), nremove)
-            random.seed = seed
-            ix_switch = random.sample(range(len(ix_test)), nswitch)
+        # NOTE: This method does not preserve class proportions
+        random.seed = seed
+        ix_remove = random.sample(range(len(ix_train)), nremove)
+        random.seed = seed
+        ix_switch = random.sample(range(len(ix_test)), nswitch)
 
-            print('Remove:', nremove)
-            print('Switch:', nswitch)
+        print('Remove:', nremove)
+        print('Switch:', nswitch)
 
-            for e in sorted(ix_remove, reverse=True):
-                ix_train.pop(e)
-            for e in sorted(ix_switch, reverse=True):
-                ix_train.append(ix_test.pop(e))
+        for e in sorted(ix_remove, reverse=True):
+            ix_train.pop(e)
+        for e in sorted(ix_switch, reverse=True):
+            ix_train.append(ix_test.pop(e))
 
-            # If ix_train and ix_test are empty, do nothing
-            try:
-                ix = ix.drop(ix_train + ix_test, level='Peptide')
-            except KeyError:
-                pass
+        # If ix_train and ix_test are empty, do nothing
+        try:
+            ix = ix.drop(ix_train + ix_test, level='Peptide')
+        except KeyError:
+            pass
 
-            # Split dataset into train and test
-            classes = ix.get_level_values('Class')
-            peptides = ix.get_level_values('Peptide').to_list()
-            split = train_test_split(peptides, stratify=classes, test_size=0.3, random_state=seed)
-            ix_train_split, ix_test_split = split
-            ix_train += ix_train_split
-            ix_test += ix_test_split
+        # Split dataset into train and test
+        classes = ix.get_level_values('Class')
+        peptides = ix.get_level_values('Peptide').to_list()
+        split = train_test_split(peptides, stratify=classes, test_size=0.3, random_state=seed)
+        ix_train_split, ix_test_split = split
+        ix_train += ix_train_split
+        ix_test += ix_test_split
 
-            df_train = df.reset_index(level='Class').loc[ix_train]
-            df_train = df_train.reset_index().set_index(['Peptide', 'Class'])
-            df_test = df.reset_index(level='Class').loc[ix_test]
-            df_test = df_test.reset_index().set_index(['Peptide', 'Class'])
+        df_train = df.reset_index(level='Class').loc[ix_train]
+        df_train = df_train.reset_index().set_index(['Peptide', 'Class'])
+        df_test = df.reset_index(level='Class').loc[ix_test]
+        df_test = df_test.reset_index().set_index(['Peptide', 'Class'])
 
-            # alternative method:
-            #df_train = df.loc[(ix_train, slice(None)), :]
-            #df_test = df.loc[(ix_test, slice(None)), :]
-            #^ terribly inefficient
+        # alternative method:
+        #df_train = df.loc[(ix_train, slice(None)), :]
+        #df_test = df.loc[(ix_test, slice(None)), :]
+        #^ terribly inefficient
 
-            scaler = MinMaxScaler(feature_range=(0, 1))
-            scaler.fit(df_train)
+        scaler = MinMaxScaler(feature_range=(0, 1))
+        scaler.fit(df_train)
 
-            def normalize_columns(df):
-                df_norm = pd.DataFrame(scaler.transform(df), columns=df.columns, index=df.index)
-                df_renamed = df.rename({x: x+'Base' for x in df.columns}, axis=1)
-                df = pd.concat([df_norm, df_renamed], axis=1)
-                df = df.reset_index().set_index('Peptide')
-                return df
+        def normalize_columns(df):
+            df_norm = pd.DataFrame(scaler.transform(df), columns=df.columns, index=df.index)
+            df_renamed = df.rename({x: x+'Base' for x in df.columns}, axis=1)
+            df = pd.concat([df_norm, df_renamed], axis=1)
+            df = df.reset_index().set_index('Peptide')
+            return df
 
-            df_train = normalize_columns(df_train)
-            df_test = normalize_columns(df_test)
+        df_train = normalize_columns(df_train)
+        df_test = normalize_columns(df_test)
 
         #except ValueError:
         #    df_train = df.copy()
