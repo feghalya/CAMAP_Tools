@@ -648,22 +648,43 @@ class RegressionDataset(Dataset):
         print('doing %d' % seed)
         metadata = []
         datasets = []
-        res = cls._preprocess_df(cls._create_df(nonsource, source))
-        for df, subname in res:
-            dat = cls._split_and_normalize_df(df, seed, peptides_train, peptides_test)
+        df_full = cls._create_df(nonsource, source)
+        for df, subname in cls._preprocess_df(df_full):
+            df_train, df_test = cls._split_df(df, seed, peptides_train, peptides_test)
+            df_train, df_test = cls._normalize_dfs(df_train, df_test)
+            datasets.append((df_train, df_test))
             metadata.append((seed, subname))
-            datasets.append(dat)
         print('done %d' % seed)
         return datasets, metadata
 
 
     @staticmethod
-    def _create_df(ns, s):
-        df_ns = pd.DataFrame(ns).set_index('Peptide')
-        df_s = pd.DataFrame(s).set_index('Peptide')
+    def _create_df(ns, s, max_reduce=True, balance=True):
+        df_ns = pd.DataFrame(ns)
+        df_s = pd.DataFrame(s)
+
+        if max_reduce:
+            def get_max(df):
+                columns = [c for c in df.columns if c != 'TPM']
+                return df.groupby(columns, sort=False).max()
+            df_ns = get_max(df_ns)
+            df_s = get_max(df_s)
+
+        if balance:
+            s_size = df_s.shape[0]
+            ns_size = df_ns.shape[0]
+            if ns_size > s_size:
+                ratio = int(ns_size // s_size)
+                df_s = pd.concat([df_s] * ratio)
+            elif s_size > ns_size:
+                ratio = int(s_size // ns_size)
+                df_ns = pd.concat([df_ns] * ratio)
+
         df_ns['Class'] = False
         df_s['Class'] = True
+
         df_full = pd.concat([df_ns, df_s], axis=0).reset_index().set_index(['Peptide', 'Class'])
+
         return df_full
 
 
@@ -673,7 +694,7 @@ class RegressionDataset(Dataset):
 
 
     @staticmethod
-    def _split_and_normalize_df(df, seed, ix_train=[], ix_test=[]):
+    def _split_df(df, seed, ix_train=[], ix_test=[]):
         #try:
         ix = df.index.drop_duplicates()
 
@@ -715,10 +736,15 @@ class RegressionDataset(Dataset):
         # Split dataset into train and test
         classes = ix.get_level_values('Class')
         peptides = ix.get_level_values('Peptide').to_list()
-        split = train_test_split(peptides, stratify=classes, test_size=0.3, random_state=seed)
-        ix_train_split, ix_test_split = split
-        ix_train += ix_train_split
-        ix_test += ix_test_split
+        try:
+            split = train_test_split(peptides, stratify=classes, test_size=0.3, random_state=seed)
+            ix_train_split, ix_test_split = split
+            ix_train += ix_train_split
+            ix_test += ix_test_split
+        except ValueError:
+            # ValueError: The least populated class in y has only 1 member, which is too few.
+            # The minimum number of groups for any class cannot be less than 2.
+            ix_train += peptides
 
         df_train = df.reset_index(level='Class').loc[ix_train]
         df_train = df_train.reset_index().set_index(['Peptide', 'Class'])
@@ -730,11 +756,22 @@ class RegressionDataset(Dataset):
         #df_test = df.loc[(ix_test, slice(None)), :]
         #^ terribly inefficient
 
+        return df_train, df_test
+
+    @staticmethod
+    def _normalize_dfs(df_train, df_test):
         scaler = MinMaxScaler(feature_range=(0, 1))
-        scaler.fit(df_train)
+        try:
+            scaler.fit(df_train)
+        except ValueError:
+            # ValueError: Found array with 0 sample(s) (shape=(0, 5)) while a minimum of 1 is required.
+            pass
 
         def normalize_columns(df):
-            df_norm = pd.DataFrame(scaler.transform(df), columns=df.columns, index=df.index)
+            try:
+                df_norm = pd.DataFrame(scaler.transform(df), columns=df.columns, index=df.index)
+            except ValueError:
+                df_norm = df.copy()
             df_renamed = df.rename({x: x+'Base' for x in df.columns}, axis=1)
             df = pd.concat([df_norm, df_renamed], axis=1)
             df = df.reset_index().set_index('Peptide')
@@ -742,14 +779,6 @@ class RegressionDataset(Dataset):
 
         df_train = normalize_columns(df_train)
         df_test = normalize_columns(df_test)
-
-        #except ValueError:
-        #    df_train = df.copy()
-        #    df_train_norm = df.copy()
-        #    df_train.columns = [x + 'Base' for x in df_train.columns]
-        #    df_train = pd.concat([df_train_norm, df_train], axis=1)
-        #    df_train = df_train.reset_index().set_index('Peptide')
-        #    df_test = pd.DataFrame(columns=df_train.reset_index().columns).set_index('Peptide')
 
         return df_train, df_test
 
