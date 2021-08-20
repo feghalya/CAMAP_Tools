@@ -101,11 +101,13 @@ def main():
 
     datasets = [RegressionDataset(g, d, context) for g, d in genome_datasets]
 
-    train, test = get_blcl_peptides()
-
     for i, (g, d) in enumerate(genome_datasets):
         if d == 'BLCL':
-            datasets[i].construct_datasets_options(train, test)
+            try:
+                datasets[i].construct_datasets_options(train, test)
+            except NameError:
+                train, test = get_blcl_peptides()
+                datasets[i].construct_datasets_options(train, test)
 
     rem = RegressionMetaManager(datasets, out_dir, workers, Executor)
     rem.set_load_peptides_options(

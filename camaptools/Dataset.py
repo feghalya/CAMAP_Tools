@@ -741,19 +741,15 @@ class RegressionDataset(Dataset):
             scaler = MinMaxScaler(feature_range=(0, 1))
             scaler.fit(df_train)
 
-            columns = df_train.columns
-            df_train.columns = [x + 'Base' for x in columns]
-            train_norm = scaler.transform(df_train)
-            df_train_norm = pd.DataFrame(train_norm, columns=columns, index=df_train.index)
-            df_train = pd.concat([df_train_norm, df_train], axis=1)
-            df_train = df_train.reset_index().set_index('Peptide')
+            def normalize_columns(df):
+                df_norm = pd.DataFrame(scaler.transform(df), columns=df.columns, index=df.index)
+                df_renamed = df.rename({x: x+'Base' for x in df.columns}, axis=1)
+                df = pd.concat([df_norm, df_renamed], axis=1)
+                df = df.reset_index().set_index('Peptide')
+                return df
 
-            columns = df_test.columns
-            df_test.columns = [x + 'Base' for x in columns]
-            test_norm = scaler.transform(df_test)
-            df_test_norm = pd.DataFrame(test_norm, columns=columns, index=df_test.index)
-            df_test = pd.concat([df_test_norm, df_test], axis=1)
-            df_test = df_test.reset_index().set_index('Peptide')
+            df_train = normalize_columns(df_train)
+            df_test = normalize_columns(df_test)
 
         #except ValueError:
         #    df_train = df.copy()
