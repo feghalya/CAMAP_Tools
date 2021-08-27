@@ -110,6 +110,10 @@ def main():
                 datasets[i].construct_datasets_options(train, test)
 
     rem = RegressionMetaManager(datasets, out_dir, workers, Executor)
+
+    for m in rem.managers:
+        m.optimize_mem_usage = True
+
     rem.set_load_peptides_options(
             max_bs_or_rank=max_bs_or_rank,
             var=var,
