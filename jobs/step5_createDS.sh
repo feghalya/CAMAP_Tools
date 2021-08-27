@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 name=create_ds
-workers=12
+workers=24
 date=`date +%Yy%mm%dd_%Hh%Mm%Ss`
 
 function runPBS {
@@ -13,11 +13,11 @@ function runPBS {
     echo '#!/usr/bin/env bash'"
 source /home/feghalya/.virtualenvs/ml/bin/activate
 echo '$cmd'
-time srun -n $workers python -m mpi4py.futures $cmd -w $(($workers-1)) --mpi
+time srun -n 1 $cmd -w $(($workers-1))
 sleep 5
 sacct --format=JobID%15,State,ExitCode,CPUTime,MaxRSS,Start,End --units M -j \$SLURM_JOBID
-" | sbatch --export ALL --account $RAP_ID --chdir $PWD --time 0-2:00:00 --ntasks $workers --cpus-per-task 1 \
-	   --mem-per-cpu 24gb --output log/$fullname.$date.log --error log/$fullname.$date.err --job-name $fullname
+" | sbatch --export ALL --account $RAP_ID --chdir $PWD --time 0-2:00:00 --cpus-per-task $workers \
+	   --mem-per-cpu 12gb --output log/$fullname.$date.log --error log/$fullname.$date.err --job-name $fullname
 }
 
 module purge

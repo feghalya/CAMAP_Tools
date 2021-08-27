@@ -1,1 +1,1 @@
-jobs/step6_trainANN.sh
+jobs/step8_regressionThreeParam.sh

@@ -4,7 +4,6 @@ import os
 from collections import defaultdict, namedtuple
 import numpy as np
 import pandas as pd
-from sklearn.linear_model import LogisticRegressionCV
 from sklearn import metrics
 from functools import partial
 import gc
@@ -25,11 +24,11 @@ Results = namedtuple('Results', ['df_results', 'df_results_max', 'df_coef', 'df_
 class RegressionMetaManager(object):
     """A wrapper around RegressionManagers that also takes care of running and distributing jobs for Datasets
     """
-    def __init__(self, datasets, out_dir, workers=0, executor=None):
+    def __init__(self, datasets, classifier, out_dir, workers=0, executor=None):
         self.out_dir = out_dir
         executor = EnhancedProcessPoolExecutor if executor is None else executor
 
-        self.managers = [RegressionManager(dat, workers, executor) for dat in datasets]
+        self.managers = [RegressionManager(dat, classifier, workers, executor) for dat in datasets]
 
         for rem in self.managers:
             rem.dataset.workers = workers
@@ -144,8 +143,9 @@ class RegressionMetaManager(object):
 class RegressionManager(object):
     """
     """
-    def __init__(self, dataset, workers=0, executor=None):
+    def __init__(self, dataset, classifier, workers=0, executor=None):
         self.dataset = dataset
+        self.classifier = classifier
         self.workers = workers
         self.executor = EnhancedProcessPoolExecutor if executor is None else executor
 
@@ -156,8 +156,8 @@ class RegressionManager(object):
     def initialize_trainers(self):
         self.trainers = {}
         for dat, (i, subname) in zip(self.dataset.datasets, self.dataset.metadata):
-            trainer = RegressionTrainer(dat, i)
-            self.trainers[trainer] = subname
+            trainer = RegressionTrainer(dat, self.classifier, i)
+            self.trainers[trainer] = self.classifier + '-' + subname
 
         self.optimize_mem_usage = False  # Can manually change to True
 
@@ -243,14 +243,15 @@ class RegressionManager(object):
 class RegressionTrainer(object):
     """
     """
-    def __init__(self, dataset, seed, workers=0, executor=None):
+    def __init__(self, dataset, classifier, seed): #, workers=0, executor=None):
         """ NOTE: Cannot fork if using MPIPoolExecutor (must use workers=0)
         """
-        self.workers = workers
+        #self.workers = workers
         # careful with parallelization as LogisticRegression spawns its own processes with all available CPUs
-        self.executor = EnhancedProcessPoolExecutor if executor is None else executor
+        #self.executor = EnhancedProcessPoolExecutor if executor is None else executor
 
         self.dataset = dataset
+        self.classifier = classifier
         self.seed = seed
 
         self.all_combinations = [
@@ -281,7 +282,7 @@ class RegressionTrainer(object):
         #    p = ex.submit(self._submit, sub_x_labels, df_train, df_test, self.seed, self.executor)
         #    self.regressions.append(p)
         for x_labels in self.all_combinations:
-            p = ex.submit(self.train_regression, x_labels, df_train, df_test, self.seed)
+            p = ex.submit(self.train_regression, x_labels, df_train, df_test, self.classifier, self.seed)
             self.regressions.append(p)
 
 
@@ -322,7 +323,7 @@ class RegressionTrainer(object):
 
 
     @staticmethod
-    def train_regression(x_labels, df_training, df_test, seed=0):
+    def train_regression(x_labels, df_train, df_test, classifier, seed):
         # Which labels are used
         prefix = "-".join(x_labels)
 
@@ -355,13 +356,73 @@ class RegressionTrainer(object):
 
         coef_dct = {prefix: {'variable': x_labels, 'coefficient': [np.nan]*len(x_labels)}}
 
-        def train(x_labels, df_train, df_test, seed):
+        def train(x_labels, df_train, df_test, classifier, seed):
             # *Train*
-            X, y = df_training[x_labels], df_training.Class
-            clf = LogisticRegressionCV(cv=10, random_state=seed, solver='lbfgs',
-                    multi_class='auto', class_weight='balanced', max_iter=1000)
-            #clf = SVC(gamma='auto', class_weight='balanced', probability=True)
-            #clf = LogisticRegression(random_state=seed, multi_class='auto', class_weight='balanced')
+
+            X, y = df_train[x_labels], df_train.Class
+
+            if classifier == 'logregcv':
+                from sklearn.linear_model import LogisticRegressionCV
+                clf = LogisticRegressionCV(
+                    cv=10,
+                    random_state=seed,
+                    solver='lbfgs',
+                    multi_class='auto',
+                    class_weight='balanced',
+                    max_iter=1000,
+                    n_jobs=1
+                )
+            elif classifier == 'logreg':
+                from sklearn.linear_model import LogisticRegression
+                clf = LogisticRegression(
+                    random_state=seed,
+                    multi_class='auto',
+                    class_weight='balanced'
+                )
+            elif classifier == 'svc':
+                from sklearn.svm import SVC
+                # SVC is very slow
+                clf = SVC(
+                    kernel='rbf',
+                    gamma='auto',
+                    class_weight='balanced',
+                    random_state=seed,
+                    probability=True
+                )
+            elif classifier == 'linsvc':
+                from sklearn.svm import SVC
+                # still slow, even in linear mode
+                # note that LinearSVC does not have an option to predict probabilities
+                clf = SVC(
+                    kernel='linear',
+                    gamma='auto',
+                    class_weight='balanced',
+                    random_state=seed,
+                    probability=True
+                )
+            elif classifier == 'rf':
+                from sklearn.ensemble import RandomForestClassifier
+                clf = RandomForestClassifier(
+                    n_estimators=100,
+                    random_state=seed,
+                    class_weight='balanced',
+                    n_jobs=1
+                )
+            elif classifier == 'knn':
+                from sklearn.neighbors import KNeighborsClassifier
+                clf = KNeighborsClassifier(
+                    n_neighbors=101,
+                    weights='distance',
+                    n_jobs=1
+                )
+            elif classifier == 'mlp':
+                from sklearn.neural_network import MLPClassifier
+                clf = MLPClassifier(
+                    max_iter=4000,
+                    hidden_layer_sizes=(100,),
+                    solver='sgd',
+                    early_stopping=True
+                )
 
             clf.fit(X, y)  # will not produce ValueError because we take care of cases where n < 10
 
@@ -449,7 +510,7 @@ class RegressionTrainer(object):
             df_scores['PredictionsReduced'] = False
 
         else:
-            coefficients, labels, scores, predictions, accuracy, weights = train(x_labels, df_train, df_test, seed)
+            coefficients, labels, scores, predictions, accuracy, weights = train(x_labels, df_train, df_test, classifier, seed)
 
             coef_dct = {prefix: {'variable': x_labels, 'coefficient': list(coefficients)}}
 

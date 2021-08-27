@@ -43,6 +43,8 @@ def main():
     parser.add_argument("-a", "--ann_method", help="ANN method to use", type=str, default='SGD')
     parser.add_argument("-p", "--ann_parameters", help="ANN training parameters selection", type=str, default='e4000')
     parser.add_argument("-x", "--max_replicates", help="ANN replicate runs to keep", type=int, default=None)
+    parser.add_argument("-s", "--classifier", type=str, default='rf',
+        help="classifier to use for predictions, possible values are: logregcv,logreg,svc,linsvc,rf,knn [rf]")
     parser.add_argument("-w", "--workers", help="number of parallel workers in addition to main", type=int, default=0)
     #parser.add_argument("-s", "--subworkers", help="number of parallel subworkers", type=int, default=0)
     parser.add_argument("--mpi", help="Parallelize using MPI", action='store_true')
@@ -59,6 +61,7 @@ def main():
     method = args['ann_method']
     params = args['ann_parameters']
     reps = args['max_replicates']
+    classifier = args['classifier']
     workers = args['workers']
     #subworkers = args['subworkers']
     mpi = args['mpi']
@@ -72,6 +75,7 @@ def main():
     print('ANN method:', method)
     print('ANN parameters:', params)
     print('Max CAMAP replicates:', reps)
+    print('Classifier:', classifier)
     print('Workers:', workers)
     #print('Subworkers:', subworkers)
     print('MPI:', mpi)
@@ -109,7 +113,7 @@ def main():
                 train, test = get_blcl_peptides()
                 datasets[i].construct_datasets_options(train, test)
 
-    rem = RegressionMetaManager(datasets, out_dir, workers, Executor)
+    rem = RegressionMetaManager(datasets, classifier, out_dir, workers, Executor)
 
     for m in rem.managers:
         m.optimize_mem_usage = True
