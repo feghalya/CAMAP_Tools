@@ -243,13 +243,7 @@ class RegressionManager(object):
 class RegressionTrainer(object):
     """
     """
-    def __init__(self, dataset, classifier, seed): #, workers=0, executor=None):
-        """ NOTE: Cannot fork if using MPIPoolExecutor (must use workers=0)
-        """
-        #self.workers = workers
-        # careful with parallelization as LogisticRegression spawns its own processes with all available CPUs
-        #self.executor = EnhancedProcessPoolExecutor if executor is None else executor
-
+    def __init__(self, dataset, classifier, seed):
         self.dataset = dataset
         self.classifier = classifier
         self.seed = seed
@@ -270,36 +264,20 @@ class RegressionTrainer(object):
 
 
     def submit(self, ex=None):
-        # expects an active executor
+        # `ex` expects an active executor
+        # Cannot fork if using MPIPoolExecutor (must use workers=0)
+
         ex = EnhancedProcessPoolExecutor(max_workers=0) if ex is None else ex  # use sequential pseudo-threads
 
         df_train, df_test = self.dataset
 
         self.regressions = []
-        #w = self.workers + 1
-        #sub_x_labels_groups = [self.all_combinations[n:n+w] for n in range(0, len(self.all_combinations), w)]
-        #for sub_x_labels in sub_x_labels_groups:
-        #    p = ex.submit(self._submit, sub_x_labels, df_train, df_test, self.seed, self.executor)
-        #    self.regressions.append(p)
         for x_labels in self.all_combinations:
-            p = ex.submit(self.train_regression, x_labels, df_train, df_test, self.classifier, self.seed)
+            p = ex.submit(self.benchmark, x_labels, df_train, df_test, self.classifier, self.seed)
             self.regressions.append(p)
 
 
-    #@classmethod
-    #def _submit(cls, sub_x_labels, df_train, df_test, seed, executor):
-    #    workers = len(sub_x_labels) - 1
-    #    sub_regressions = []
-    #    with executor(max_workers=workers, use_threads=True) as sex:  # secondary ex
-    #        for x_labels in sub_x_labels:
-    #            p = sex.submit(cls.train_regression, x_labels, df_train, df_test, seed)
-    #            sub_regressions.append(p)
-    #        print(sex)
-    #    return [p.result() for p in sub_regressions]
-
-
     def join(self):
-        #regressions = [res for p in self.regressions for res in p.result()]
         regressions = [p.result() for p in self.regressions]
 
         results = {}
@@ -322,8 +300,8 @@ class RegressionTrainer(object):
         self.df_scores = df_scores
 
 
-    @staticmethod
-    def train_regression(x_labels, df_train, df_test, classifier, seed):
+    @classmethod
+    def benchmark(cls, x_labels, df_train, df_test, classifier, seed):
         # Which labels are used
         prefix = "-".join(x_labels)
 
@@ -356,144 +334,6 @@ class RegressionTrainer(object):
 
         coef_dct = {prefix: {'variable': x_labels, 'coefficient': [np.nan]*len(x_labels)}}
 
-        def train(x_labels, df_train, df_test, classifier, seed):
-            # *Train*
-
-            X, y = df_train[x_labels], df_train.Class
-
-            if classifier == 'logregcv':
-                from sklearn.linear_model import LogisticRegressionCV
-                clf = LogisticRegressionCV(
-                    cv=10,
-                    random_state=seed,
-                    solver='lbfgs',
-                    multi_class='auto',
-                    class_weight='balanced',
-                    max_iter=1000,
-                    n_jobs=1
-                )
-            elif classifier == 'logreg':
-                from sklearn.linear_model import LogisticRegression
-                clf = LogisticRegression(
-                    random_state=seed,
-                    multi_class='auto',
-                    class_weight='balanced'
-                )
-            elif classifier == 'svc':
-                from sklearn.svm import SVC
-                # SVC is very slow
-                clf = SVC(
-                    kernel='rbf',
-                    gamma='auto',
-                    class_weight='balanced',
-                    random_state=seed,
-                    probability=True
-                )
-            elif classifier == 'linsvc':
-                from sklearn.svm import SVC
-                # still slow, even in linear mode
-                # note that LinearSVC does not have an option to predict probabilities
-                clf = SVC(
-                    kernel='linear',
-                    gamma='auto',
-                    class_weight='balanced',
-                    random_state=seed,
-                    probability=True
-                )
-            elif classifier == 'rf':
-                from sklearn.ensemble import RandomForestClassifier
-                clf = RandomForestClassifier(
-                    n_estimators=100,
-                    random_state=seed,
-                    class_weight='balanced',
-                    n_jobs=1
-                )
-            elif classifier == 'knn':
-                from sklearn.neighbors import KNeighborsClassifier
-                clf = KNeighborsClassifier(
-                    n_neighbors=101,
-                    weights='distance',
-                    n_jobs=1
-                )
-            elif classifier == 'mlp':
-                from sklearn.neural_network import MLPClassifier
-                clf = MLPClassifier(
-                    max_iter=4000,
-                    hidden_layer_sizes=(100,),
-                    solver='sgd',
-                    early_stopping=True
-                )
-
-            clf.fit(X, y)  # will not produce ValueError because we take care of cases where n < 10
-
-            try:
-                coefficients = clf.coef_[0]
-                s = ": Regression coef %s" % coefficients
-            except AttributeError:
-                s = ": Coefficients not available"
-                coefficients = [np.nan]*len(x_labels)
-
-            print(prefix, s)
-
-            # *Test*
-
-            X, y = df_test[x_labels], df_test.Class
-
-            weights = abs(y - (y.sum() / y.shape[0]))
-
-            labels = y.to_numpy()
-            scores = clf.predict_proba(X)[:,1]
-            predictions = clf.predict(X)
-            accuracy = clf.score(X, y, weights)
-            calc_accuracy = (((scores >= 0.5) == labels) * weights).sum() / weights.sum()
-
-            if np.array_equal(scores >= 0.5, predictions):
-                assert np.isclose(accuracy, calc_accuracy)
-            else:
-                print('Scores and predictions differ, normal if not using LogReg')
-                #print('Will be using calculcated accuracy for consistency')
-                print(
-                    'Predicated accuracy :',
-                    round(accuracy, 5),
-                    ' ; Calculated accuracy :',
-                    round(calc_accuracy, 5)
-                )
-
-            return coefficients, labels, scores, predictions, accuracy, weights
-
-        def calc_metrics(labels, scores, predictions):
-            weights = abs(labels - (labels.sum() / labels.shape[0]))
-
-            accuracy = ((predictions == labels) * weights).sum() / weights.sum()
-            ppv = metrics.precision_score(
-                labels, predictions, sample_weight=weights,
-                labels=None, pos_label=1, average='binary'
-            )
-            npv = metrics.precision_score(
-                labels, 1 - predictions, sample_weight=weights,
-                labels=None, pos_label=1, average='binary'
-            )
-            sensitivity = metrics.recall_score(
-                1 - labels, predictions, sample_weight=weights,
-                labels=None, pos_label=1, average='binary'
-            )
-            specificity = metrics.recall_score(
-                1 - labels, 1 - predictions, sample_weight=weights,
-                labels=None, pos_label=1, average='binary'
-            )
-            mcc = metrics.matthews_corrcoef(labels, predictions, sample_weight=weights)
-            fpr, tpr, thresholds = metrics.roc_curve(labels, scores)
-            auc = metrics.auc(fpr, tpr)
-            auc_data = {'FPR': list(fpr), 'TPR': list(tpr), 'THRESHOLDS': list(thresholds)}
-
-            # NOTE on MCC
-            #factor = len(labels[~labels])//len(labels[labels])
-            #predictions_w = np.concatenate([np.repeat(predictions[labels], factor), predictions[~labels]])
-            #labels_w = np.concatenate([np.repeat(labels[labels], factor), labels[~labels]])
-            # ==> Calculating MCC with weights is identical to weighting predictions and labels beforehand
-
-            return accuracy, ppv, npv, sensitivity, specificity, mcc, auc, auc_data
-
         if df_train.Class.sum() < 10 or (~df_train.Class).sum() < 10 or \
                 df_test.Class.sum() < 10 or (~df_test.Class).sum() < 10:
             print('Less than 10 members in one class. Skipping...')
@@ -510,7 +350,7 @@ class RegressionTrainer(object):
             df_scores['PredictionsReduced'] = False
 
         else:
-            coefficients, labels, scores, predictions, accuracy, weights = train(x_labels, df_train, df_test, classifier, seed)
+            coefficients, labels, scores, predictions, accuracy, weights = cls.train(x_labels, df_train, df_test, classifier, seed)
 
             coef_dct = {prefix: {'variable': x_labels, 'coefficient': list(coefficients)}}
 
@@ -532,7 +372,7 @@ class RegressionTrainer(object):
             #assert all_pos == tp + fn
             #assert all_neg == tn + fp
 
-            accuracy, ppv, npv, sensitivity, specificity, mcc, auc, auc_data = calc_metrics(labels, scores, predictions)
+            accuracy, ppv, npv, sensitivity, specificity, mcc, auc, auc_data = cls.calc_metrics(labels, scores, predictions)
 
             results[('Accuracy', prefix)] = accuracy
             results[('PPV', prefix)] = ppv
@@ -563,7 +403,7 @@ class RegressionTrainer(object):
             #fp = (~labels & predictions).sum()
             #fn = (labels & ~predictions).sum()
 
-            accuracy, ppv, npv, sensitivity, specificity, mcc, auc, auc_data = calc_metrics(labels, scores, predictions)
+            accuracy, ppv, npv, sensitivity, specificity, mcc, auc, auc_data = cls.calc_metrics(labels, scores, predictions)
 
             results_max[('Accuracy', prefix)] = accuracy
             results_max[('PPV', prefix)] = ppv
@@ -590,3 +430,145 @@ class RegressionTrainer(object):
         df_scores.columns = pd.MultiIndex.from_product([[prefix], df_scores.columns])
 
         return results, results_max, coef_dct, auc_dct, df_scores
+
+
+    @staticmethod
+    def train(x_labels, df_train, df_test, classifier, seed):
+        # *Train*
+
+        X, y = df_train[x_labels], df_train.Class
+
+        if classifier == 'logregcv':
+            from sklearn.linear_model import LogisticRegressionCV
+            clf = LogisticRegressionCV(
+                cv=10,
+                random_state=seed,
+                solver='lbfgs',
+                multi_class='auto',
+                class_weight='balanced',
+                max_iter=1000,
+                n_jobs=1
+            )
+        elif classifier == 'logreg':
+            from sklearn.linear_model import LogisticRegression
+            clf = LogisticRegression(
+                random_state=seed,
+                multi_class='auto',
+                class_weight='balanced'
+            )
+        elif classifier == 'svc':
+            from sklearn.svm import SVC
+            # SVC is very slow
+            clf = SVC(
+                kernel='rbf',
+                gamma='auto',
+                class_weight='balanced',
+                random_state=seed,
+                probability=True
+            )
+        elif classifier == 'linsvc':
+            from sklearn.svm import SVC
+            # still slow, even in linear mode
+            # note that LinearSVC does not have an option to predict probabilities
+            clf = SVC(
+                kernel='linear',
+                gamma='auto',
+                class_weight='balanced',
+                random_state=seed,
+                probability=True
+            )
+        elif classifier == 'rf':
+            from sklearn.ensemble import RandomForestClassifier
+            clf = RandomForestClassifier(
+                n_estimators=100,
+                random_state=seed,
+                class_weight='balanced',
+                n_jobs=1
+            )
+        elif classifier == 'knn':
+            from sklearn.neighbors import KNeighborsClassifier
+            clf = KNeighborsClassifier(
+                n_neighbors=101,
+                weights='distance',
+                n_jobs=1
+            )
+        elif classifier == 'mlp':
+            from sklearn.neural_network import MLPClassifier
+            clf = MLPClassifier(
+                max_iter=4000,
+                hidden_layer_sizes=(3,3,1),
+                solver='adam',
+                early_stopping=True
+            )
+
+        clf.fit(X, y)  # will not produce ValueError because we take care of cases where n < 10
+
+        try:
+            coefficients = clf.coef_[0]
+            s = ": Regression coef %s" % coefficients
+        except AttributeError:
+            s = ": Coefficients not available"
+            coefficients = [np.nan]*len(x_labels)
+
+        print(prefix, s)
+
+        # *Test*
+
+        X, y = df_test[x_labels], df_test.Class
+
+        weights = abs(y - (y.sum() / y.shape[0]))
+
+        labels = y.to_numpy()
+        scores = clf.predict_proba(X)[:,1]
+        predictions = clf.predict(X)
+        accuracy = clf.score(X, y, weights)
+        calc_accuracy = (((scores >= 0.5) == labels) * weights).sum() / weights.sum()
+
+        if np.array_equal(scores >= 0.5, predictions):
+            assert np.isclose(accuracy, calc_accuracy)
+        else:
+            print('Scores and predictions differ, normal if not using LogReg')
+            #print('Will be using calculcated accuracy for consistency')
+            print(
+                'Predicated accuracy :',
+                round(accuracy, 5),
+                ' ; Calculated accuracy :',
+                round(calc_accuracy, 5)
+            )
+
+        return coefficients, labels, scores, predictions, accuracy, weights
+
+
+    @staticmethod
+    def calc_metrics(labels, scores, predictions):
+        weights = abs(labels - (labels.sum() / labels.shape[0]))
+
+        accuracy = ((predictions == labels) * weights).sum() / weights.sum()
+        ppv = metrics.precision_score(
+            labels, predictions, sample_weight=weights,
+            labels=None, pos_label=1, average='binary'
+        )
+        npv = metrics.precision_score(
+            labels, 1 - predictions, sample_weight=weights,
+            labels=None, pos_label=1, average='binary'
+        )
+        sensitivity = metrics.recall_score(
+            1 - labels, predictions, sample_weight=weights,
+            labels=None, pos_label=1, average='binary'
+        )
+        specificity = metrics.recall_score(
+            1 - labels, 1 - predictions, sample_weight=weights,
+            labels=None, pos_label=1, average='binary'
+        )
+        mcc = metrics.matthews_corrcoef(labels, predictions, sample_weight=weights)
+        fpr, tpr, thresholds = metrics.roc_curve(labels, scores)
+        auc = metrics.auc(fpr, tpr)
+        auc_data = {'FPR': list(fpr), 'TPR': list(tpr), 'THRESHOLDS': list(thresholds)}
+
+        # Note on MCC
+        #factor = len(labels[~labels])//len(labels[labels])
+        #predictions_w = np.concatenate([np.repeat(predictions[labels], factor), predictions[~labels]])
+        #labels_w = np.concatenate([np.repeat(labels[labels], factor), labels[~labels]])
+        # ==> Calculating MCC with weights is identical to weighting predictions and labels beforehand
+
+        return accuracy, ppv, npv, sensitivity, specificity, mcc, auc, auc_data
