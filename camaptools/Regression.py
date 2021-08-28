@@ -534,10 +534,13 @@ class RegressionTrainer(object):
             from sklearn.neural_network import MLPClassifier
             clf = MLPClassifier(
                 max_iter=4000,
-                hidden_layer_sizes=(100,10),
-                solver='adam',
-                early_stopping=True
+                hidden_layer_sizes=(100,),
+                solver='sgd',
+                early_stopping=True,
+                random_state=seed
             )
+        else:
+            raise
 
         return clf
 
