@@ -18,7 +18,7 @@ from camaptools.EnhancedFutures import EnhancedProcessPoolExecutor, EnhancedMPIP
 # https://scikit-learn.org/stable/modules/generated/sklearn.metrics.classification_report.html : Note that in binary classification, recall of the positive class is also known as “sensitivity”; recall of the negative class is “specificity”.
 
 
-Results = namedtuple('Results', ['df_results', 'df_results_max', 'df_coef', 'df_scores', 'auc_data'])
+Results = namedtuple('Results', ['df_results', 'df_results_max', 'df_coef', 'df_scores', 'auc_data', 'auc_data_max'])
 
 
 class RegressionMetaManager(object):
@@ -56,7 +56,7 @@ class RegressionMetaManager(object):
             df_results = pd.concat(result['df_results'], axis=1)
             df_results_max = pd.concat(result['df_results_max'], axis=1)
             df_coef = pd.concat(result['df_coef'], axis=0)
-            self.results[subname] = Results._make([df_results, df_results_max, df_coef, pd.DataFrame(), {}])
+            self.results[subname] = Results._make([df_results, df_results_max, df_coef, pd.DataFrame(), {}, {}])
         self.results = dict(self.results)
         self.write(self.results, self.out_dir)
 
@@ -116,6 +116,9 @@ class RegressionMetaManager(object):
 
         with gzip.open(out_auc + '.auc_data.json.gz', 'wb') as f:
             f.write(str.encode(json.dumps(res.auc_data) + '\n'))
+
+        with gzip.open(out_auc + '.auc_data.redmax.json.gz', 'wb') as f:
+            f.write(str.encode(json.dumps(res.auc_data_max) + '\n'))
 
 
     @staticmethod
@@ -191,6 +194,7 @@ class RegressionManager(object):
         results_max_dct = defaultdict(list)
         coef_dct = defaultdict(list)
         auc_data = defaultdict(list)
+        auc_data_max = defaultdict(list)
         df_scores_list = []
 
         for trainer in trainers:
@@ -202,6 +206,8 @@ class RegressionManager(object):
                 coef_dct[k].append(trainer.coef_dct[k])
             for k in trainer.auc_data:
                 auc_data[k].append(trainer.auc_data[k])
+            for k in trainer.auc_data_max:
+                auc_data_max[k].append(trainer.auc_data_max[k])
             df_sc = trainer.df_scores.copy().replace(np.nan, None)
             re_index = [(self.name, self.allele, trainer.seed, x[0], x[1]) for x in df_sc.index]
             re_index_names = ['Dataset', 'Allele', 'N'] + df_sc.index.names
@@ -224,6 +230,8 @@ class RegressionManager(object):
 
         auc_data = {self.name + ':::' + self.allele: dict(auc_data)}
 
+        auc_data_max = {self.name + ':::' + self.allele: dict(auc_data_max)}
+
         dct = {}
         for prefix, val_lst in coef_dct.items():
             for rep, values in enumerate(val_lst):
@@ -235,7 +243,7 @@ class RegressionManager(object):
 
         df_scores = pd.concat(df_scores_list, copy=False, axis=0).sort_index(axis=1)
 
-        results = (df_results, df_results_max, df_coef, df_scores, auc_data)
+        results = (df_results, df_results_max, df_coef, df_scores, auc_data, auc_data_max)
 
         return Results._make(results)
 
@@ -243,6 +251,7 @@ class RegressionManager(object):
 class RegressionTrainer(object):
     """
     """
+
     def __init__(self, dataset, classifier, seed):
         self.dataset = dataset
         self.classifier = classifier
@@ -284,160 +293,149 @@ class RegressionTrainer(object):
         results_max = {}
         coef_dct = {}
         auc_data = {}
+        auc_data_max = {}
         df_scores = pd.DataFrame()
 
-        for r, rm, coef, auc, df_sc in regressions:
+        for r, rm, coef, auc, aucm, df_sc in regressions:
             results = {**results, **r}
             results_max = {**results_max, **rm}
             coef_dct = {**coef_dct, **coef}
             auc_data = {**auc_data, **auc}
+            auc_data_max = {**auc_data_max, **aucm}
             df_scores = pd.concat([df_scores, df_sc], axis=1)
 
         self.results_dct = results
         self.results_max_dct = results_max
         self.coef_dct = coef_dct
         self.auc_data = auc_data
+        self.auc_data_max = auc_data_max
         self.df_scores = df_scores
 
 
     @classmethod
     def benchmark(cls, x_labels, df_train, df_test, classifier, seed):
-        # Which labels are used
         prefix = "-".join(x_labels)
-
-        # Prepare return data with null values
-        results = {
-            ('Accuracy', prefix): np.nan,
-            ('PPV', prefix): np.nan,
-            ('Sensitivity', prefix): np.nan,
-            ('Specificity', prefix): np.nan,
-            ('AUC', prefix) : np.nan,
-            ('MCC', prefix): np.nan
-        }
-
-        results_max = {
-            ('Accuracy', prefix): np.nan,
-            ('PPV', prefix): np.nan,
-            ('Sensitivity', prefix): np.nan,
-            ('Specificity', prefix): np.nan,
-            ('AUC', prefix) : np.nan,
-            ('MCC', prefix): np.nan
-        }
 
         df_scores = df_test.copy()
         df_scores = df_scores.reset_index().set_index(['Peptide', 'Class'])
         df_scores = df_scores[[x for x in df_scores.columns if x == prefix or x == prefix + 'Base']].copy()
         df_scores = df_scores.rename({prefix: 'NormScores', prefix + 'Base': 'BaseScores'}, axis=1)
 
-        auc_dct = {'FPR': [], 'TPR': [], 'THRESHOLDS': [], 'FPR_max': [], 'TPR_max': [], 'THRESHOLDS_max': []}
-        auc_dct = {prefix: auc_dct}
+        tr_cls = df_train.Class
+        ts_cls = df_test.Class
 
-        coef_dct = {prefix: {'variable': x_labels, 'coefficient': [np.nan]*len(x_labels)}}
-
-        if df_train.Class.sum() < 10 or (~df_train.Class).sum() < 10 or \
-                df_test.Class.sum() < 10 or (~df_test.Class).sum() < 10:
+        if tr_cls.sum() < 10 or (~tr_cls).sum() < 10 or ts_cls.sum() < 10 or (~ts_cls).sum() < 10:
             print('Less than 10 members in one class. Skipping...')
-
-            if df_scores.empty:
-                columns = df_scores.columns.to_list() + ['Scores', 'Predictions', 'ScoresReduced', 'PredictionsReduced']
-                df_scores = pd.DataFrame({'Peptide': ['X'], 'Class': [False]}).set_index(['Peptide', 'Class'])
-                for col in columns:
-                    df_scores[col] = np.nan
-
-            df_scores['Scores'] = np.nan
-            df_scores['Predictions'] = False
-            df_scores['ScoresReduced'] = np.nan
-            df_scores['PredictionsReduced'] = False
-
+            final_results = cls._benchmark_null(df_scores, x_labels)
         else:
-            coefficients, labels, scores, predictions, accuracy, weights = cls.train(x_labels, df_train, df_test, classifier, seed)
+            clf = cls.get_clf(classifier, seed)
+            train_results = cls.train(x_labels, df_train, df_test, clf)
+            final_results = cls._benchmark(df_scores, train_results)
 
-            coef_dct = {prefix: {'variable': x_labels, 'coefficient': list(coefficients)}}
+        # *Add prefix and return*
+        results, results_max, coef_dct, auc_dct, auc_dct_max, df_scores = final_results
 
-            # *Append to test DF*
-            df_scores['Scores'] = scores
-            df_scores['Predictions'] = predictions
+        results = {(k, prefix): v for k, v in results.items()}
+        results_max = {(k, prefix): v for k, v in results_max.items()}
+        coef_dct['variable'] = x_labels
+        coef_dct = {prefix: coef_dct}
+        auc_dct = {prefix: auc_dct}
+        auc_dct_max = {prefix: auc_dct_max}
+        df_scores.columns = pd.MultiIndex.from_product([[prefix], df_scores.columns])
 
-            # *Calculate metrics*
+        return results, results_max, coef_dct, auc_dct, auc_dct_max, df_scores
 
-            # 1) Conventional method
 
-            #tp = (labels & predictions).sum()
-            #tn = (~labels & ~predictions).sum()
-            #fp = (~labels & predictions).sum()
-            #fn = (labels & ~predictions).sum()
+    @classmethod
+    def _benchmark(cls, df_scores, train_results):
+        coefficients, labels, scores, predictions, accuracy, weights = train_results
 
-            #all_pos = labels.sum()
-            #all_neg = (~labels).sum()
-            #assert all_pos == tp + fn
-            #assert all_neg == tn + fp
+        coef_dct = {'coefficient': list(coefficients)}
 
-            accuracy, ppv, npv, sensitivity, specificity, mcc, auc, auc_data = cls.calc_metrics(labels, scores, predictions)
+        # *Append to test DF*
+        df_scores['Scores'] = scores
+        df_scores['Predictions'] = predictions
 
-            results[('Accuracy', prefix)] = accuracy
-            results[('PPV', prefix)] = ppv
-            results[('NPV', prefix)] = npv
-            results[('Sensitivity', prefix)] = sensitivity
-            results[('Specificity', prefix)] = specificity
-            results[('AUC', prefix)] = auc
-            results[('MCC', prefix)] = mcc
+        # *Calculate metrics*
 
-            auc_dct = auc_data
+        # 1) Conventional method
 
-            # 2) Keep only max score per peptide and re-calculate metrics (same strategy as reduce_tables)
+        results, auc_dct = cls.calc_metrics(labels, scores, predictions)
 
-            df_max = df_test[['Class']].copy()
-            df_max['Scores'] = scores
-            types = df_max.dtypes
-            df_max = df_max.groupby("Peptide", sort=False).apply(max)
-            df_max = df_max.astype(types)
+        # 2) Keep only max score per peptide and re-calculate metrics (same strategy as reduce_tables)
 
-            labels = df_max.Class.to_numpy()
-            scores = df_max.Scores.to_numpy()
+        df_max = df_scores.reset_index().set_index('Peptide')[['Class']].copy()
+        df_max['Scores'] = scores
+        types = df_max.dtypes
+        df_max = df_max.groupby('Peptide', sort=False).apply(max)
+        df_max = df_max.astype(types)
 
-            predictions = scores >= 0.5
-            df_max['Predictions'] = predictions
+        labels = df_max.Class.to_numpy()
+        scores = df_max.Scores.to_numpy()
 
-            #tp = (labels & predictions).sum()
-            #tn = (~labels & ~predictions).sum()
-            #fp = (~labels & predictions).sum()
-            #fn = (labels & ~predictions).sum()
+        predictions = scores >= 0.5
+        df_max['Predictions'] = predictions
 
-            accuracy, ppv, npv, sensitivity, specificity, mcc, auc, auc_data = cls.calc_metrics(labels, scores, predictions)
+        results_max, auc_dct_max = cls.calc_metrics(labels, scores, predictions)
 
-            results_max[('Accuracy', prefix)] = accuracy
-            results_max[('PPV', prefix)] = ppv
-            results_max[('NPV', prefix)] = npv
-            results_max[('Sensitivity', prefix)] = sensitivity
-            results_max[('Specificity', prefix)] = specificity
-            results_max[('AUC', prefix)] = auc
-            results_max[('MCC', prefix)] = mcc
+        # *Append to test DF*
+        df_max = df_max.reset_index().set_index(['Peptide', 'Class'])
+        df_max = df_max.rename(
+            {'Scores': 'ScoresReduced', 'Predictions': 'PredictionsReduced'},
+            axis=1
+        )
 
-            auc_dct_max =  {k+'_max': v for k, v in auc_data.items()}
-
-            # *Merge AUC values*
-            auc_dct = {prefix: {**auc_dct, **auc_dct_max}}
-
-            # *Append to test DF*
-            df_max = df_max.reset_index().set_index(['Peptide', 'Class'])
-            df_max = df_max.rename({'Scores': 'ScoresReduced', 'Predictions': 'PredictionsReduced'}, axis=1)
-            df_scores = df_scores.merge(df_max, on=['Peptide', 'Class'])
+        df_scores = df_scores.merge(df_max, on=['Peptide', 'Class'])
 
         # *Sort test DF columns*
         df_scores = df_scores.sort_index(axis=1)
 
-        # *Add prefix as level 0 column index*
-        df_scores.columns = pd.MultiIndex.from_product([[prefix], df_scores.columns])
-
-        return results, results_max, coef_dct, auc_dct, df_scores
+        return results, results_max, coef_dct, auc_dct, auc_dct_max, df_scores
 
 
     @staticmethod
-    def train(x_labels, df_train, df_test, classifier, seed):
-        # *Train*
+    def _benchmark_null(df_scores, x_labels):
+        results = {
+            'Accuracy': np.nan,
+            'PPV': np.nan,
+            'Sensitivity': np.nan,
+            'Specificity': np.nan,
+            'AUC' : np.nan,
+            'MCC': np.nan
+        }
 
-        X, y = df_train[x_labels], df_train.Class
+        results_max = {
+            'Accuracy': np.nan,
+            'PPV': np.nan,
+            'Sensitivity': np.nan,
+            'Specificity': np.nan,
+            'AUC' : np.nan,
+            'MCC': np.nan
+        }
 
+        coef_dct = {'coefficient': [np.nan]*len(x_labels)}
+
+        auc_dct = {'FPR': [], 'TPR': [], 'THRESHOLDS': []}
+        auc_dct_max = {'FPR': [], 'TPR': [], 'THRESHOLDS': []}
+
+        if df_scores.empty:
+            cols = ['Scores', 'Predictions', 'ScoresReduced', 'PredictionsReduced']
+            columns = df_scores.columns.to_list() + cols
+            dummy_scores = {'Peptide': ['X'], 'Class': [False]}
+            df_scores = pd.DataFrame(dummy_scores).set_index(['Peptide', 'Class'])
+            for col in columns:
+                df_scores[col] = np.nan
+
+        df_scores['Scores'] = np.nan
+        df_scores['Predictions'] = False
+        df_scores['ScoresReduced'] = np.nan
+        df_scores['PredictionsReduced'] = False
+
+        return results, results_max, coef_dct, auc_dct, auc_dct_max, df_scores
+
+
+    @staticmethod
+    def get_clf(classifier, seed):
         if classifier == 'logregcv':
             from sklearn.linear_model import LogisticRegressionCV
             clf = LogisticRegressionCV(
@@ -496,10 +494,18 @@ class RegressionTrainer(object):
             from sklearn.neural_network import MLPClassifier
             clf = MLPClassifier(
                 max_iter=4000,
-                hidden_layer_sizes=(3,3,1),
+                hidden_layer_sizes=(100,10),
                 solver='adam',
                 early_stopping=True
             )
+
+        return clf
+
+
+    @staticmethod
+    def train(x_labels, df_train, df_test, clf):
+        # *Train*
+        X, y = df_train[x_labels], df_train.Class
 
         clf.fit(X, y)  # will not produce ValueError because we take care of cases where n < 10
 
@@ -509,11 +515,9 @@ class RegressionTrainer(object):
         except AttributeError:
             s = ": Coefficients not available"
             coefficients = [np.nan]*len(x_labels)
-
-        print(prefix, s)
+        print("-".join(x_labels), s)
 
         # *Test*
-
         X, y = df_test[x_labels], df_test.Class
 
         weights = abs(y - (y.sum() / y.shape[0]))
@@ -527,8 +531,6 @@ class RegressionTrainer(object):
         if np.array_equal(scores >= 0.5, predictions):
             assert np.isclose(accuracy, calc_accuracy)
         else:
-            print('Scores and predictions differ, normal if not using LogReg')
-            #print('Will be using calculcated accuracy for consistency')
             print(
                 'Predicated accuracy :',
                 round(accuracy, 5),
@@ -563,7 +565,6 @@ class RegressionTrainer(object):
         mcc = metrics.matthews_corrcoef(labels, predictions, sample_weight=weights)
         fpr, tpr, thresholds = metrics.roc_curve(labels, scores)
         auc = metrics.auc(fpr, tpr)
-        auc_data = {'FPR': list(fpr), 'TPR': list(tpr), 'THRESHOLDS': list(thresholds)}
 
         # Note on MCC
         #factor = len(labels[~labels])//len(labels[labels])
@@ -571,4 +572,15 @@ class RegressionTrainer(object):
         #labels_w = np.concatenate([np.repeat(labels[labels], factor), labels[~labels]])
         # ==> Calculating MCC with weights is identical to weighting predictions and labels beforehand
 
-        return accuracy, ppv, npv, sensitivity, specificity, mcc, auc, auc_data
+        out_dct = {}
+        out_dct['Accuracy'] = accuracy
+        out_dct['PPV'] = ppv
+        out_dct['NPV'] = npv
+        out_dct['Sensitivity'] = sensitivity
+        out_dct['Specificity'] = specificity
+        out_dct['AUC'] = auc
+        out_dct['MCC'] = mcc
+
+        auc_dct = {'FPR': list(fpr), 'TPR': list(tpr), 'THRESHOLDS': list(thresholds)}
+
+        return out_dct, auc_dct
