@@ -22,28 +22,19 @@ from camaptools.EnhancedFutures import EnhancedProcessPoolExecutor, EnhancedMPIP
 Results = namedtuple('Results', ['df_results', 'df_ppv', 'df_coef', 'df_scores', 'auc_data'])
 
 
-class RegressionMetaManager(object):
-    """A wrapper around RegressionManagers that also takes care of running and distributing jobs for Datasets
+class RegressionAggregator(object):
+    """A wrapper around RegressionManagers that dumps results to disk
     """
-    def __init__(self, datasets, classifier, out_dir, workers=0, executor=None):
+    def __init__(self, regressors, out_dir, workers=0, executor=None):
         self.out_dir = out_dir
         executor = EnhancedProcessPoolExecutor if executor is None else executor
-
-        self.managers = [RegressionManager(dat, classifier, workers, executor) for dat in datasets]
-
-        for rem in self.managers:
-            rem.dataset.workers = workers
-            rem.dataset.executor = executor
-
-
-    def set_load_peptides_options(self, *args, **kwargs):
-        for rem in self.managers:
-            rem.dataset.load_peptides_options(*args, **kwargs)
+        # expects regressors to have their trainers initialized
+        self.managers = regressors
 
 
     def run(self):
-        known_keys = ['df_results', 'df_ppv', 'df_coef']
         tex = ThreadPoolExecutor(max_workers=1)
+        known_keys = ['df_results', 'df_ppv', 'df_coef']
         future = tex.submit(lambda: defaultdict(lambda: {k: [] for k in known_keys}))
         for rem in self.managers:
             print(rem.name)
@@ -67,12 +58,6 @@ class RegressionMetaManager(object):
 
     @staticmethod
     def _run(rem):
-        #rem.dataset.pepfiles = [x for x in rem.dataset.pepfiles if 'W9' in x]
-        #rem.dataset.pepfiles = [x for x in rem.dataset.pepfiles if x.find('peptides_W') > -1]
-        rem.dataset.load_peptides()
-        rem.dataset.construct_datasets()
-        rem.dataset.clear_unused()
-        rem.initialize_trainers()
         rem.start()
         rem.join()
 
@@ -155,23 +140,51 @@ class RegressionMetaManager(object):
 class RegressionManager(object):
     """
     """
-    def __init__(self, dataset, classifier, workers=0, executor=None):
+    def __init__(self, dataset, workers=0, executor=None):
         self.dataset = dataset
-        self.classifier = classifier
         self.workers = workers
         self.executor = EnhancedProcessPoolExecutor if executor is None else executor
 
         self.allele = list(self.dataset.alleles)[0] if len(self.dataset.alleles) == 1 else 'HLA-MinScore'
         self.name = self.dataset.dataset_name
 
+        self.optimize_mem_usage = False  # can be modified manually
 
-    def initialize_trainers(self):
+
+    def initialize_trainers(self, classifiers):
         self.trainers = {}
         for dat, (i, subname) in zip(self.dataset.datasets, self.dataset.metadata):
-            trainer = RegressionTrainer(dat, self.classifier, i)
-            self.trainers[trainer] = self.classifier + '-' + subname
+            for classifier in classifiers:
+                trainer = RegressionTrainer(dat, classifier, i)
+                self.trainers[trainer] = classifier + '-' + subname
 
-        self.optimize_mem_usage = False  # Can manually change to True
+        if self.optimize_mem_usage:
+            del self.dataset.datasets
+            gc.collect()
+
+
+    def dump_trainers(self, path_on_disk):
+        for trainer, subdir in self.trainers.items():
+            out_dir = os.path.join(path_on_disk, self.name, subdir)
+            out_file = os.path.join(out_dir, str(trainer.seed) +'.p')
+            os.makedirs(out_dir, exist_ok=True)
+            with open(out_file, 'wb') as f:
+                pkl.dump(trainer, f)
+
+
+    def load_trainers(self, path_on_disk, classifiers):
+        self.trainers = {}
+        for subdir in os.listdir(os.path.join(path_on_disk, self.name)):
+            if subdir.split('-')[0] in classifiers:
+                for t_file in os.listdir(os.path.join(path_on_disk, self.name, subdir)):
+                    assert t_file.endswith('.p')
+                    t_path = os.path.join(path_on_disk, self.name, subdir, t_file)
+                    if self.optimize_mem_usage:
+                        trainer = RegressionTrainerLowMemory(t_path)
+                    else:
+                         with open(t_path, 'rb') as f:
+                            trainer = pkl.load(f)
+                    self.trainers[trainer] = subdir
 
 
     def start(self):
@@ -179,12 +192,6 @@ class RegressionManager(object):
             for t in self.trainers:
                 t.submit(ex)
             print(ex)
-
-        if self.optimize_mem_usage:
-            for t in self.trainers:
-                del t.dataset
-            del self.dataset.datasets
-            gc.collect()
 
 
     def join(self):
@@ -673,3 +680,37 @@ class RegressionTrainer(object):
             out_dct[(stage, 'fpr')] = fpr
 
         return out_dct
+
+
+class RegressionTrainerLowMemory(RegressionTrainer):
+    def __init__(self, trainer_pkl):
+        self.trainer_pkl = trainer_pkl
+
+        classifier, seed, all_combinations = self.load_essentials()
+
+        self.classifier = classifier
+        self.seed = seed
+        self.all_combinations = all_combinations
+
+        self.dataset = self.trainer_pkl
+
+
+    def load_essentials(self):
+        with EnhancedProcessPoolExecutor(max_workers=1, use_threads=False) as ex:
+            p = ex.submit(self._load, self.trainer_pkl)
+        return p.result()
+
+
+    @staticmethod
+    def _load(trainer_pkl):
+        with open(trainer_pkl, 'rb') as f:
+            trainer = pkl.load(f)
+        return trainer.classifier, trainer.seed, trainer.all_combinations
+
+
+    @classmethod
+    def benchmark(cls, x_labels, trainer_pkl, classifier, seed):
+        with open(trainer_pkl, 'rb') as f:
+            trainer = pkl.load(f)
+        dataset = trainer.dataset
+        return super().benchmark(x_labels, dataset, classifier, seed)

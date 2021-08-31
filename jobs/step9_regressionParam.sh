@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 
 name=regression_analysis
-workers=100
+workers=500
 date=`date +%Yy%mm%dd_%Hh%Mm%Ss`
 
 function runPBS {
     extra_params=$1
+    scratch_location=$2
+    params="${extra_params} -f ${scratch_location} "
     fullname=${name}${extra_params// /}
     echo $fullname
 
@@ -13,10 +15,10 @@ function runPBS {
 module load scipy-stack/2021a
 module load mpi4py/3.0.3
 source /home/feghalya/.virtualenvs/ml2/bin/activate
-time srun -n $workers python -m mpi4py.futures ./regressionAnalysis.py -w $(($workers-1)) ${extra_params}--mpi
+time srun -n $workers python -m mpi4py.futures ./regressionAnalysis.py -w $(($workers-1)) ${params}--mpi
 sleep 5
 sacct --format=JobID%15,State,ExitCode,CPUTime,MaxRSS,Start,End --units M -j \$SLURM_JOBID
-" | sbatch --account $RAP_ID --chdir $PWD --time 0-24:00:00 --ntasks $workers --cpus-per-task 8 \
+" | sbatch --account $RAP_ID --chdir $PWD --time 0-6:00:00 --ntasks $workers --cpus-per-task 4 \
            --mem-per-cpu 4gb --output log/$fullname.$date.log --error log/$fullname.$date.err --job-name $fullname
 }
 
@@ -24,11 +26,4 @@ sacct --format=JobID%15,State,ExitCode,CPUTime,MaxRSS,Start,End --units M -j \$S
 module purge
 mkdir -p log
 
-runPBS "-n -r 1 -a SGD -p e4000 -x 12 -s mlp -m 10 "
-#runPBS "-n -r 1 -a SGD -p e4000 "
-#runPBS "-n -r 5 -a SGD -p e4000 "
-#runPBS "-r 1 -a SGD -p e4000 -x 3 "
-#runPBS "-r 1250 -a SGD -p e4000 -x 3 "
-#runPBS "-n -r 1 -a Adam -p e500pep9t5 -x 3 "
-#runPBS "-n -r 1 -a SGD -p e4000pep9t5y -x 3 "
-#runPBS "-n -r 1 -a SGD -p e4000pep9t5z -x 3 "
+runPBS "-s mlp,logregcv,rf,knn" "/scratch/feghalya/camap/39cf757a"

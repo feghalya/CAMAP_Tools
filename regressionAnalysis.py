@@ -4,128 +4,63 @@ import argparse
 import os
 
 from camaptools.Dataset import RegressionDataset
-from camaptools.Regression import RegressionMetaManager
+from camaptools.Regression import RegressionAggregator, RegressionManager
 from camaptools.EnhancedFutures import EnhancedProcessPoolExecutor, EnhancedMPIPoolExecutor
 
 
 OUTPUT_FOLDER = "./output"
 
 
-def get_blcl_peptides():
-    train = []
-    test = []
-
-    with open('../CAMAP/peptides_dataset_162/peptides.source.train.txt', 'r') as f:
-        train.extend([x.strip() for x in f.readlines() if x.strip()])
-    with open('../CAMAP/peptides_dataset_162/peptides.nonsource.train.txt', 'r') as f:
-        train.extend([x.strip() for x in f.readlines() if x.strip()])
-    with open('../CAMAP/peptides_dataset_162/peptides.source.validation.txt', 'r') as f:
-        train.extend([x.strip() for x in f.readlines() if x.strip()])
-    with open('../CAMAP/peptides_dataset_162/peptides.nonsource.validation.txt', 'r') as f:
-        train.extend([x.strip() for x in f.readlines() if x.strip()])
-    with open('../CAMAP/peptides_dataset_162/peptides.source.test.txt', 'r') as f:
-        test.extend([x.strip() for x in f.readlines() if x.strip()])
-    with open('../CAMAP/peptides_dataset_162/peptides.nonsource.test.txt', 'r') as f:
-        test.extend([x.strip() for x in f.readlines() if x.strip()])
-
-    return train, test
-
-
 def main():
     parser=argparse.ArgumentParser()
 
-    parser.add_argument("-g", "--genomes", help="genomes [GRCh37.75, etc.]", type=str, default="GRCh37.75,GRCm38.78")
-    #parser.add_argument("-d", "--dataset", help="dataset [BLCL, EL4, etc.]", type=str, default="BLCL")
+    parser.add_argument("-f", "--folder", help="location of initialized trainers", type=str, required=True)
+    parser.add_argument("-d", "--datasets", type=str,
+        default="GRCh37.75_BLCL,GRCh37.75_B721,GRCh37.75_PBMCs,GRCm38.78_EL4,GRCm38.78_CT26",
+        help="dataset [GRCh37.75_BLCL, GRCm38.78_EL4, etc.]"
+    )
     parser.add_argument("-c", "--context", help="mRNA context length on each side", type=int, default=162)
-    parser.add_argument("-r", "--bs_or_rank", help="max binding score (>=100) or rank (<100)", type=int, default=1250)
-    parser.add_argument("-n", "--np", help="use rank score from naturally processed peptides", action='store_true')
-    parser.add_argument("-m", "--ncontexts", help="max contexts permitted to keep peptide", type=int, default=10)
-    parser.add_argument("-a", "--ann_method", help="ANN method to use", type=str, default='SGD')
-    parser.add_argument("-p", "--ann_parameters", help="ANN training parameters selection", type=str, default='e4000')
-    parser.add_argument("-x", "--max_replicates", help="ANN replicate runs to keep", type=int, default=None)
-    parser.add_argument("-s", "--classifier", type=str, default='rf',
-        help="classifier to use for predictions, possible values are: logregcv,logreg,svc,linsvc,rf,knn [rf]")
+    parser.add_argument("-s", "--classifiers", type=str, default='mlp',
+        help="classifiers to use for predictions, possible values are: mlp,logregcv,logreg,svc,linsvc,rf,knn [mlp]")
     parser.add_argument("-w", "--workers", help="number of parallel workers in addition to main", type=int, default=0)
-    #parser.add_argument("-s", "--subworkers", help="number of parallel subworkers", type=int, default=0)
     parser.add_argument("--mpi", help="Parallelize using MPI", action='store_true')
 
     args=parser.parse_args().__dict__
 
-    genomes = args['genomes'].split(',')
-    #ds = args['dataset']
+    folder = args['folder']
+    genome_datasets = [tuple(x.split('_')) for x in args['datasets'].split(',')]
+    classifiers = args['classifiers'].split(',')
     context = args['context']
-    max_bs_or_rank = args['bs_or_rank']
-    var = 'Rank_NP' if args['np'] else 'nM'
-    var = 'Rank' if max_bs_or_rank < 100 and var != 'Rank_NP' else var
-    max_contexts = args['ncontexts']
-    method = args['ann_method']
-    params = args['ann_parameters']
-    reps = args['max_replicates']
-    classifier = args['classifier']
     workers = args['workers']
-    #subworkers = args['subworkers']
     mpi = args['mpi']
 
+    genomes = sorted(list(set([x[0] for x in genome_datasets])))
+    raw_datasets = [x[1] for x in genome_datasets]
+
+    print('Folder:', folder)
     print('Genomes:', genomes)
-    #print('Dataset:', ds)
+    print('Datasets:', raw_datasets)
+    print('Classifiers:', classifiers)
     print('Context:', context)
-    print('Max BS/Rank:', max_bs_or_rank)
-    print('BS or Rank detected:', var)
-    print('Max contexts per peptide:', max_contexts)
-    print('ANN method:', method)
-    print('ANN parameters:', params)
-    print('Max CAMAP replicates:', reps)
-    print('Classifier:', classifier)
     print('Workers:', workers)
-    #print('Subworkers:', subworkers)
     print('MPI:', mpi)
 
     Executor = EnhancedMPIPoolExecutor if mpi else EnhancedProcessPoolExecutor
 
-    out_name = 'genome%s_padding%d_max%s%d_maxContexts%d_ANNMethod%s%s' % (
-            'genome'.join(genomes),
-            context,
-            var.replace('nM', 'BS').replace('_', ''),
-            max_bs_or_rank,
-            max_contexts,
-            method,
-            params
-        )
+    assert len(os.listdir(folder)) == 1
+    out_name = os.listdir(folder)[0]
 
     out_dir = os.path.join(OUTPUT_FOLDER, 'metrics', out_name)
 
-    genome_datasets = []
-    for genome in genomes:
-        if 'GRCh' in genome:
-            for ds in ['BLCL', 'B721', 'PBMCs']:
-                genome_datasets.append((genome, ds))
-        elif 'GRCm' in genome:
-            for ds in ['EL4', 'CT26']:
-                genome_datasets.append((genome, ds))
-
     datasets = [RegressionDataset(g, d, context) for g, d in genome_datasets]
+    regressors = [RegressionManager(dat, workers, Executor) for dat in datasets]
 
-    for i, (g, d) in enumerate(genome_datasets):
-        if d == 'BLCL':
-            try:
-                datasets[i].construct_datasets_options(train, test)
-            except NameError:
-                train, test = get_blcl_peptides()
-                datasets[i].construct_datasets_options(train, test)
-
-    rem = RegressionMetaManager(datasets, classifier, out_dir, workers, Executor)
-
-    for m in rem.managers:
+    for m in regressors:
         m.optimize_mem_usage = True
+        m.load_trainers(os.path.join(folder, out_name), classifiers)
 
-    rem.set_load_peptides_options(
-            max_bs_or_rank=max_bs_or_rank,
-            var=var,
-            max_contexts=max_contexts,
-            step='evaluateDS',
-            ann_method=method,
-            ann_params=params,
-            max_replicates=reps)
+    rem = RegressionAggregator(regressors, out_dir, workers, Executor)
+
     rem.run()
     rem.join()
 
