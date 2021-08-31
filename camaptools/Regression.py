@@ -119,7 +119,7 @@ class RegressionAggregator(object):
             os.makedirs(out_dir, exist_ok=True)
 
             out_file_results = os.path.join(out_dir, 'metrics.tsv')
-            out_file_ppv = os.path.join(out_dir, 'ppv.metrics.tsv')
+            out_file_ppv = os.path.join(out_dir, 'ppv.tsv')
             #out_file_results_max = os.path.join(out_dir, 'metrics.redmax.tsv')
             out_file_coefficients = os.path.join(out_dir, 'coefficients.tsv')
 
@@ -305,11 +305,9 @@ class RegressionTrainer(object):
 
         ex = EnhancedProcessPoolExecutor(max_workers=0) if ex is None else ex  # use sequential pseudo-threads
 
-        df_train, df_test = self.dataset
-
         self.regressions = []
         for x_labels in self.all_combinations:
-            p = ex.submit(self.benchmark, x_labels, df_train, df_test, self.classifier, self.seed)
+            p = ex.submit(self.benchmark, x_labels, self.dataset, self.classifier, self.seed)
             self.regressions.append(p)
 
 
@@ -344,7 +342,9 @@ class RegressionTrainer(object):
 
 
     @classmethod
-    def benchmark(cls, x_labels, df_train, df_test, classifier, seed):
+    def benchmark(cls, x_labels, dataset, classifier, seed):
+        df_train, df_test = dataset
+
         prefix = "-".join(x_labels)
 
         df_scores = df_test.copy()
