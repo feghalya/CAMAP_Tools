@@ -537,23 +537,18 @@ class RegressionDataset(Dataset):
         # Construct datasets
 
         workers = min(self.workers, n_replicates)
-        #subworkers = (self.workers - workers) // n_replicates
-        #subworkers = 0
-        # _process_df does nothing (for now)
-        # additionaly, we cannot fork if using MPIPoolExecutor
 
         with self.executor(max_workers=workers, use_threads=False) as ex:
             processes = []
             for i, (nonsource, source) in enumerate(zip(*self.df_dictionnaries)):
                 seed = i + 1
                 p = ex.submit(
-                    self._create_preprocess_split,
+                    self._construct,
                     seed,
                     nonsource,
                     source,
                     self.peptides_train,
-                    self.peptides_test
-                )  #self.executor, subworkers)
+                )
                 processes.append(p)
             print(ex)
         datasets, metadata = zip(*[p.result() for p in processes])
@@ -644,7 +639,7 @@ class RegressionDataset(Dataset):
 
 
     @classmethod
-    def _create_preprocess_split(cls, seed, nonsource, source, peptides_train, peptides_test):
+    def _construct(cls, seed, nonsource, source, peptides_train, peptides_test):
         print('doing %d' % seed)
         metadata = []
         datasets = []
@@ -757,6 +752,7 @@ class RegressionDataset(Dataset):
         #^ terribly inefficient
 
         return df_train, df_test
+
 
     @staticmethod
     def _normalize_dfs(df_train, df_test):

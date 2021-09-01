@@ -18,7 +18,6 @@ from camaptools.EnhancedFutures import EnhancedProcessPoolExecutor, EnhancedMPIP
 # https://scikit-learn.org/stable/modules/generated/sklearn.metrics.classification_report.html : Note that in binary classification, recall of the positive class is also known as “sensitivity”; recall of the negative class is “specificity”.
 
 
-#Results = namedtuple('Results', ['df_results', 'df_results_max', 'df_coef', 'df_scores', 'auc_data', 'auc_data_max'])
 Results = namedtuple('Results', ['df_results', 'df_ppv', 'df_coef', 'df_scores', 'auc_data'])
 
 
@@ -38,7 +37,8 @@ class RegressionAggregator(object):
         future = tex.submit(lambda: defaultdict(lambda: {k: [] for k in known_keys}))
         for rem in self.managers:
             print(rem.name)
-            self._run(rem)
+            rem.start()
+            rem.join()
             future = tex.submit(self._merge, rem, future.result(), self.out_dir)
         self.results = future.result()
         tex.shutdown()
@@ -47,19 +47,11 @@ class RegressionAggregator(object):
     def join(self):
         for subname, result in self.results.items():
             df_results = pd.concat(result['df_results'], axis=1)
-            #df_results_max = pd.concat(result['df_results_max'], axis=1)
             df_ppv = pd.concat(result['df_ppv'], axis=1)
             df_coef = pd.concat(result['df_coef'], axis=0)
-            #self.results[subname] = Results._make([df_results, df_results_max, df_coef, pd.DataFrame(), {}, {}])
             self.results[subname] = Results._make([df_results, df_ppv, df_coef, pd.DataFrame(), {}])
         self.results = dict(self.results)
         self.write(self.results, self.out_dir)
-
-
-    @staticmethod
-    def _run(rem):
-        rem.start()
-        rem.join()
 
 
     @classmethod
@@ -68,7 +60,6 @@ class RegressionAggregator(object):
             res = rem.results[trainer_group]
 
             results[trainer_group]['df_results'].append(res.df_results)
-            #results[trainer_group]['df_results_max'].append(res.df_results_max)
             results[trainer_group]['df_ppv'].append(res.df_ppv)
             results[trainer_group]['df_coef'].append(res.df_coef)
 
@@ -101,15 +92,11 @@ class RegressionAggregator(object):
 
         save(res.df_results, out_bak + '.results.tsv')
         save(res.df_ppv, out_bak + '.ppv.tsv')
-        #save(res.df_results_max, out_bak + '.results.max.tsv')
         save(res.df_coef, out_bak + '.coefficients.tsv')
         save(res.df_scores, out_scores + '.scores.tsv.gz', compression='gzip')
 
         with gzip.open(out_auc + '.auc_data.json.gz', 'wb') as f:
             f.write(str.encode(json.dumps(res.auc_data) + '\n'))
-
-        #with gzip.open(out_auc + '.auc_data.redmax.json.gz', 'wb') as f:
-        #    f.write(str.encode(json.dumps(res.auc_data_max) + '\n'))
 
 
     @staticmethod
@@ -120,11 +107,9 @@ class RegressionAggregator(object):
 
             out_file_results = os.path.join(out_dir, 'metrics.tsv')
             out_file_ppv = os.path.join(out_dir, 'ppv.tsv')
-            #out_file_results_max = os.path.join(out_dir, 'metrics.redmax.tsv')
             out_file_coefficients = os.path.join(out_dir, 'coefficients.tsv')
 
             print('Saving %s at %s' % (out_file_results, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-            #print('Saving %s at %s' % (out_file_results_max, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
             print('Saving %s at %s' % (out_file_ppv, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
             print('Saving %s at %s' % (out_file_coefficients, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
 
@@ -132,7 +117,6 @@ class RegressionAggregator(object):
                 df.to_csv(out_file, sep='\t', float_format='%g', na_rep='nan')
 
             save(res.df_results, out_file_results)
-            #save(res.df_results_max, out_file_results_max)
             save(res.df_ppv, out_file_ppv)
             save(res.df_coef, out_file_coefficients)
 
@@ -140,6 +124,7 @@ class RegressionAggregator(object):
 class RegressionManager(object):
     """
     """
+
     def __init__(self, dataset, workers=0, executor=None):
         self.dataset = dataset
         self.workers = workers
@@ -181,6 +166,7 @@ class RegressionManager(object):
                     t_path = os.path.join(path_on_disk, self.name, subdir, t_file)
                     if self.optimize_mem_usage:
                         trainer = RegressionTrainerLowMemory(t_path)
+                        #^ this step is slow, can be easily parallelized
                     else:
                          with open(t_path, 'rb') as f:
                             trainer = pkl.load(f)
@@ -207,26 +193,20 @@ class RegressionManager(object):
 
     def _merge(self, trainers):
         results_dct = defaultdict(list)
-        #results_max_dct = defaultdict(list)
         ppv_dct = defaultdict(list)
         coef_dct = defaultdict(list)
         auc_data = defaultdict(list)
-        #auc_data_max = defaultdict(list)
         df_scores_list = []
 
         for trainer in trainers:
             for k in trainer.results_dct:
                 results_dct[k].append(trainer.results_dct[k])
-            #for k in trainer.results_max_dct:
-            #    results_max_dct[k].append(trainer.results_max_dct[k])
             for k in trainer.ppv_dct:
                 ppv_dct[k].append(trainer.ppv_dct[k])
             for k in trainer.coef_dct:
                 coef_dct[k].append(trainer.coef_dct[k])
             for k in trainer.auc_data:
                 auc_data[k].append(trainer.auc_data[k])
-            #for k in trainer.auc_data_max:
-            #    auc_data_max[k].append(trainer.auc_data_max[k])
             df_sc = trainer.df_scores.copy().replace(np.nan, None)
             re_index = [(self.name, self.allele, trainer.seed, x[0], x[1]) for x in df_sc.index]
             re_index_names = ['Dataset', 'Allele', 'N'] + df_sc.index.names
@@ -240,13 +220,6 @@ class RegressionManager(object):
         df_results = df_results.transpose()
         df_results.index.names = ['Allele', 'Metric', 'Regression']
 
-        #df_results_max = pd.DataFrame(results_max_dct).sort_index(axis=1)
-        #df_results_max.index = df_results_max.index + 1
-        #df_results_max.columns = pd.Index([(self.allele, x[0], x[1]) for x in df_results_max.columns])
-        #df_results_max.index = pd.Index([(self.name, x) for x in df_results_max.index])
-        #df_results_max = df_results_max.transpose()
-        #df_results_max.index.names = ['Allele', 'Metric', 'Regression']
-
         df_ppv = pd.DataFrame(ppv_dct).sort_index(axis=1)
         df_ppv.index = df_ppv.index + 1
         df_ppv.columns = pd.Index([(self.allele, x[0], x[1], x[2]) for x in df_ppv.columns])
@@ -255,8 +228,6 @@ class RegressionManager(object):
         df_ppv.index.names = ['Allele', 'Metric', 'Statistic', 'Regression']
 
         auc_data = {self.name + ':::' + self.allele: dict(auc_data)}
-
-        #auc_data_max = {self.name + ':::' + self.allele: dict(auc_data_max)}
 
         dct = {}
         for prefix, val_lst in coef_dct.items():
@@ -269,7 +240,6 @@ class RegressionManager(object):
 
         df_scores = pd.concat(df_scores_list, copy=False, axis=0).sort_index(axis=1)
 
-        #results = (df_results, df_results_max, df_coef, df_scores, auc_data, auc_data_max)
         results = (df_results, df_ppv, df_coef, df_scores, auc_data)
 
         return Results._make(results)
@@ -315,29 +285,22 @@ class RegressionTrainer(object):
         regressions = [p.result() for p in self.regressions]
 
         results = {}
-        #results_max = {}
         ppv_dct = {}
         coef_dct = {}
         auc_data = {}
-        #auc_data_max = {}
         df_scores = pd.DataFrame()
 
-        #for r, rm, coef, auc, aucm, df_sc in regressions:
         for r, ppv, coef, auc, df_sc in regressions:
             results = {**results, **r}
-            #results_max = {**results_max, **rm}
             ppv_dct = {**ppv_dct, **ppv}
             coef_dct = {**coef_dct, **coef}
             auc_data = {**auc_data, **auc}
-            #auc_data_max = {**auc_data_max, **aucm}
             df_scores = pd.concat([df_scores, df_sc], axis=1)
 
         self.results_dct = results
-        #self.results_max_dct = results_max
         self.ppv_dct = ppv_dct
         self.coef_dct = coef_dct
         self.auc_data = auc_data
-        #self.auc_data_max = auc_data_max
         self.df_scores = df_scores
 
 
@@ -364,19 +327,15 @@ class RegressionTrainer(object):
             final_results = cls._benchmark(df_scores, train_results)
 
         # *Add prefix and return*
-        #results, results_max, coef_dct, auc_dct, auc_dct_max, df_scores = final_results
         results, ppv_dct, coef_dct, auc_dct, df_scores = final_results
 
         results = {(k, prefix): v for k, v in results.items()}
-        #results_max = {(k, prefix): v for k, v in results_max.items()}
         ppv_dct = {k + (prefix,): v for k, v in ppv_dct.items()}
         coef_dct['variable'] = x_labels
         coef_dct = {prefix: coef_dct}
         auc_dct = {prefix: auc_dct}
-        #auc_dct_max = {prefix: auc_dct_max}
         df_scores.columns = pd.MultiIndex.from_product([[prefix], df_scores.columns])
 
-        #return results, results_max, coef_dct, auc_dct, auc_dct_max, df_scores
         return results, ppv_dct, coef_dct, auc_dct, df_scores
 
 
@@ -386,21 +345,12 @@ class RegressionTrainer(object):
 
         coef_dct = {'coefficient': list(coefficients)}
 
-        # *Append to test DF*
-        #df_scores['Scores'] = scores
-        #df_scores['Predictions'] = predictions
-
-        # *Calculate metrics*
-
         # 1) Conventional method
         #    DEPRECATED for 2 reasons
         #       1. RedMax method is biologically more sound and returns better predictions
         #       2. Training is done on a weighted dataset where the lower class count is
         #          copied enough time to mimic the higher class count
-
-        #results, auc_dct = cls.calc_metrics(labels, scores, predictions)
-        #ppv_dct = cls.calc_ppv_metrics(labels, scores)
-
+        #
         # 2) Keep only max score per peptide and re-calculate metrics (same strategy as reduce_tables)
 
         df_max = df_scores.reset_index().set_index('Peptide')[['Class']].copy()
@@ -415,24 +365,18 @@ class RegressionTrainer(object):
         predictions = scores >= 0.5
         df_max['Predictions'] = predictions
 
-        #results_max, auc_dct_max = cls.calc_metrics(labels, scores, predictions)
-        #ppv_dct_max = cls.calc_ppv_metrics(labels, scores)
+        # *Calculate metrics*
         results, auc_dct = cls.calc_metrics(labels, scores, predictions)
         ppv_dct = cls.calc_ppv_metrics(labels, scores)
 
         # *Append to test DF*
         df_max = df_max.reset_index().set_index(['Peptide', 'Class'])
-        #df_max = df_max.rename(
-        #    {'Scores': 'ScoresReduced', 'Predictions': 'PredictionsReduced'},
-        #    axis=1
-        #)
 
         df_scores = df_scores.merge(df_max, on=['Peptide', 'Class'])
 
         # *Sort test DF columns*
         df_scores = df_scores.sort_index(axis=1)
 
-        #return results, results_max, coef_dct, auc_dct, auc_dct_max, df_scores
         return results, ppv_dct, coef_dct, auc_dct, df_scores
 
 
@@ -447,12 +391,9 @@ class RegressionTrainer(object):
             'MCC': np.nan
         }
 
-        #results_max = {k: v for k, v in results.items()}
-
         coef_dct = {'coefficient': [np.nan]*len(x_labels)}
 
         auc_dct = {'FPR': [], 'TPR': [], 'THRESHOLDS': []}
-        #auc_dct_max = {'FPR': [], 'TPR': [], 'THRESHOLDS': []}
 
         ppv_dct = {}
         ppv_dct[('nEntries', 'nhits')] = 0
@@ -477,7 +418,6 @@ class RegressionTrainer(object):
         df_scores['ScoresReduced'] = np.nan
         df_scores['PredictionsReduced'] = False
 
-        #return results, results_max, coef_dct, auc_dct, auc_dct_max, df_scores
         return results, ppv_dct, coef_dct, auc_dct, df_scores
 
 
@@ -528,21 +468,21 @@ class RegressionTrainer(object):
                 n_estimators=100,
                 random_state=seed,
                 class_weight='balanced',
-                n_jobs=1
+                n_jobs=8
             )
         elif classifier == 'knn':
             from sklearn.neighbors import KNeighborsClassifier
             clf = KNeighborsClassifier(
                 n_neighbors=101,
                 weights='distance',
-                n_jobs=1
+                n_jobs=8
             )
         elif classifier == 'mlp':
             from sklearn.neural_network import MLPClassifier
             clf = MLPClassifier(
                 max_iter=4000,
-                hidden_layer_sizes=(100,),
-                solver='sgd',
+                hidden_layer_sizes=(1000,),
+                solver='adam',
                 early_stopping=True,
                 random_state=seed
             )
@@ -641,10 +581,10 @@ class RegressionTrainer(object):
         nentries = len(scores)
         nhits = sum(labels)
 
-        def calc(percentage):
-            _, sorted_labels = zip(*sorted(zip(scores, labels), key=lambda x: x[0]))
-            sorted_labels = np.cumsum(sorted_labels)
+        _, sorted_labels = zip(*sorted(zip(scores, labels), key=lambda x: x[0], reverse=True))
+        sorted_labels = np.cumsum(sorted_labels).tolist()
 
+        def calc(percentage):
             if nhits == 0:
                 n = 0
             elif nhits*percentage < 1:
@@ -653,20 +593,20 @@ class RegressionTrainer(object):
                 n = round(nhits*percentage)
 
             try:
-                npredicted = sorted_labels.tolist().index(n) + 1
+                npred = sorted_labels.index(n) + 1
             except ValueError:
                 assert nhits == 0
-                npredicted = 0
+                npred = 0
 
             try:
-                fpr = round((npredicted - nhits)/npredicted*100, 3)
+                fpr_val = round((npred - n)/npred*100, 3)
             except ZeroDivisionError:
                 if nhits == 0:
-                    fpr = np.nan
+                    fpr_val = np.nan
                 else:
-                    fpr = 100
+                    fpr_val = 100
 
-            return n, npredicted, fpr
+            return n, npred, fpr_val
 
         out_dct = {}
         out_dct[('nEntries', 'nhits')] = nentries
@@ -684,25 +624,14 @@ class RegressionTrainer(object):
 
 class RegressionTrainerLowMemory(RegressionTrainer):
     def __init__(self, trainer_pkl):
-        self.trainer_pkl = trainer_pkl
-
-        classifier, seed, all_combinations = self.load_essentials()
-
-        self.classifier = classifier
-        self.seed = seed
-        self.all_combinations = all_combinations
-
-        self.dataset = self.trainer_pkl
-
-
-    def load_essentials(self):
         with EnhancedProcessPoolExecutor(max_workers=1, use_threads=False) as ex:
-            p = ex.submit(self._load, self.trainer_pkl)
-        return p.result()
+            p = ex.submit(self._load_essentials, trainer_pkl)
+        self.classifier, self.seed, self.all_combinations = p.result()
+        self.dataset = trainer_pkl
 
 
     @staticmethod
-    def _load(trainer_pkl):
+    def _load_essentials(trainer_pkl):
         with open(trainer_pkl, 'rb') as f:
             trainer = pkl.load(f)
         return trainer.classifier, trainer.seed, trainer.all_combinations
