@@ -36,14 +36,16 @@ def main():
         help="dataset [GRCh37.75_BLCL, GRCm38.78_EL4, etc.]"
     )
     parser.add_argument("-c", "--context", help="mRNA context length on each side", type=int, default=162)
-    parser.add_argument("-r", "--bs_or_rank", help="max binding score (>=100) or rank (<100)", type=int, default=1250)
+    parser.add_argument("-r", "--bs-or-rank", help="max binding score (>=100) or rank (<100)", type=int, default=1250)
     parser.add_argument("-n", "--np", help="use rank score from naturally processed peptides", action='store_true')
     parser.add_argument("-m", "--ncontexts", help="max contexts permitted to keep peptide", type=int, default=10)
-    parser.add_argument("-a", "--ann_method", help="ANN method to use", type=str, default='SGD')
-    parser.add_argument("-p", "--ann_parameters", help="ANN training parameters selection", type=str, default='e4000')
-    parser.add_argument("-x", "--max_replicates", help="ANN replicate runs to keep", type=int, default=None)
+    parser.add_argument("-a", "--ann-method", help="ANN method to use", type=str, default='SGD')
+    parser.add_argument("-p", "--ann-parameters", help="ANN training parameters selection", type=str, default='e4000')
+    parser.add_argument("-x", "--max-replicates", help="ANN replicate runs to keep", type=int, default=None)
     parser.add_argument("-s", "--classifiers", type=str, default='mlp',
         help="classifiers to use for predictions, possible values are: mlp,logregcv,logreg,svc,linsvc,rf,knn [mlp]")
+    parser.add_argument("--max-tpm", help="Use only max TPM value per context", action='store_true')
+    parser.add_argument("--balance", help="Use only max TPM value per context", action='store_true')
     parser.add_argument("-w", "--workers", help="number of parallel workers in addition to main", type=int, default=0)
     parser.add_argument("-f", "--folder", help="folder to dump trainers in", type=str, required=True)
     parser.add_argument("--mpi", help="Parallelize using MPI", action='store_true')
@@ -61,6 +63,8 @@ def main():
     params = args['ann_parameters']
     reps = args['max_replicates']
     classifiers = args['classifiers'].split(',')
+    max_reduce = args['max_tpm']
+    balance = args['balance']
     workers = args['workers']
     folder = args['folder']
     mpi = args['mpi']
@@ -79,6 +83,8 @@ def main():
     print('ANN parameters:', params)
     print('Max CAMAP replicates:', reps)
     print('Classifiers:', classifiers)
+    print('Use only max TPM:', max_reduce)
+    print('Force balanced classes:', balance)
     print('Workers:', workers)
     #print('Subworkers:', subworkers)
     print('Folder:', folder)
@@ -88,12 +94,13 @@ def main():
 
     Executor = EnhancedMPIPoolExecutor if mpi else EnhancedProcessPoolExecutor
 
-    out_name = 'genome%s_padding%d_max%s%d_maxContexts%d_ANNMethod%s%s' % (
-            'genome'.join(genomes),
+    out_name = 'g%s_pad%d_max%s%d_maxCont%d_maxRed%s_ANNMeth%s%s' % (
+            'g'.join(genomes),
             context,
             var.replace('nM', 'BS').replace('_', ''),
             max_bs_or_rank,
             max_contexts,
+            str(max_reduce),
             method,
             params
         )
@@ -125,7 +132,7 @@ def main():
             dat.pepfiles = [x for x in dat.pepfiles if 'W9' in x]
             #dat.pepfiles = [x for x in dat.pepfiles if x.find('peptides_W') > -1]
         dat.load_peptides()
-        dat.construct_datasets()
+        dat.construct_datasets(max_reduce, balance)
         dat.clear_unused()
         rem = RegressionManager(dat)
         rem.initialize_trainers(classifiers)

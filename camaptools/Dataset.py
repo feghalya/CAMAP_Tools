@@ -520,11 +520,12 @@ class RegressionDataset(Dataset):
         self.peptides_test = peptides_test
 
 
-    def construct_datasets(self):
+    def construct_datasets(self, max_reduce=True, balance=False):
         """Note that self.load_peptides needs to be executed for all required
         variables to get populated
 
         """
+
         try:
             n_replicates = len(self.df_dictionnaries[0])
         except AttributeError:
@@ -548,6 +549,9 @@ class RegressionDataset(Dataset):
                     nonsource,
                     source,
                     self.peptides_train,
+                    self.peptides_test,
+                    max_reduce,
+                    balance
                 )
                 processes.append(p)
             print(ex)
@@ -639,11 +643,11 @@ class RegressionDataset(Dataset):
 
 
     @classmethod
-    def _construct(cls, seed, nonsource, source, peptides_train, peptides_test):
+    def _construct(cls, seed, nonsource, source, peptides_train, peptides_test, max_reduce, balance):
         print('doing %d' % seed)
         metadata = []
         datasets = []
-        df_full = cls._create_df(nonsource, source)
+        df_full = cls._create_df(nonsource, source, max_reduce, balance)
         for df, subname in cls._preprocess_df(df_full):
             df_train, df_test = cls._split_df(df, seed, peptides_train, peptides_test)
             df_train, df_test = cls._normalize_dfs(df_train, df_test)
@@ -654,7 +658,7 @@ class RegressionDataset(Dataset):
 
 
     @staticmethod
-    def _create_df(ns, s, max_reduce=True, balance=True):
+    def _create_df(ns, s, max_reduce, balance):
         df_ns = pd.DataFrame(ns)
         df_s = pd.DataFrame(s)
 
