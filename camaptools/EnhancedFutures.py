@@ -25,6 +25,11 @@ class EnhancedFuture(object):
         elif self.kind == 'process':
             return self.process.result()
 
+    def delete(self):
+        if self.kind == 'process':
+            del self.process._result
+            del self.process
+
 
 class EnhancedProcessPoolExecutor(object):
     def __init__(self, max_workers=0, use_threads=True, mpi=False):
@@ -99,8 +104,11 @@ class EnhancedProcessPoolExecutor(object):
         self.run()
         return [self.result(f) for f in futures]
 
-    def result(self, future):
-        return future.result()
+    def result(self, future, delete=False):
+        result = future.result()
+        if delete:
+            future.delete()
+        return result
 
     def run(self):
         for future in self.threads:
