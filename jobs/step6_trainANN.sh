@@ -38,7 +38,8 @@ epochs=4000
 datasets=
 #datasets=$datasets" BLCL_GRCh37.75_padding162_maxBS500_maxContexts10_ratio5_peplen9@pep9t5"
 datasets=$datasets" BLCL_GRCh37.75_padding162_maxBS500_maxContexts10_ratio5_peplen9_sameGC@pep9t5x"
-#datasets=$datasets" BLCL_GRCh37.75_padding162_maxBS500_maxContexts10_ratio5_peplen9_sameTPM@pep9t5y"
+datasets=$datasets" BLCL_GRCh37.75_padding162_maxBS500_maxContexts10_ratio5_peplen9_sameTPM@pep9t5y"
+datasets=$datasets" BLCL_GRCh37.75_padding162_maxBS500_maxContexts10_ratio5_peplen9_sameBS@pep9t5z"
 #datasets=$datasets" BLCL_GRCh37.75_padding162_maxBS500_maxContexts3_ratio5_peplen9@pep9t5m3"
 #datasets=$datasets" BLCL_GRCh37.75_padding162_maxBS500_maxContexts0_ratio5_peplen9@pep9t5mINF"
 #datasets=$datasets" BLCL_GRCh38.98_padding162_maxBS500_maxContexts10_ratio5_peplen9@pep9t5"
@@ -65,4 +66,12 @@ do
         run="camap ${context} -cse -e $epochs -n $name -w 5 -o sgd --device cuda -subf pytorch-sgd-shuffle"
         runPBS "$name-sgd-shuffle" "$exp" "$dsname" "$run"
     done
+
+    #for exp in 1 4 7 10
+    #do
+    #    name="p${context}e${epochs}${dsshortname}"
+    #    run="camap ${context} -aae -e $epochs -n $name -w 5 -o sgd --device cuda -subf pytorch-sgd-aminoacid"
+    #    runPBS "$name-sgd-aminoacid" "$exp" "$dsname" "$run"
+    #done
+
 done

@@ -23,7 +23,6 @@ sacct --format=JobID%15,State,ExitCode,CPUTime,MaxRSS,Start,End --units M -j \$S
 module purge
 mkdir -p log
 
-#genome=GRCh38.98
 genome=GRCh37.75
 dataset=BLCL
 
@@ -51,6 +50,66 @@ runPBS "$job_cmd" "$job_name"
 #job_name=${genome}_${dataset}_p9_t5
 #runPBS "$job_cmd" "$job_name"
 
+#dataset=B721
+#
+#job_cmd="./makeTrainingDS.py -g $genome -d $dataset -s 12 -c 162 -r 500"
+#job_name=${genome}_${dataset}_pALL_tINF_mINF
+#runPBS "$job_cmd" "$job_name"
+
+#job_cmd="./makeTrainingDS.py -g $genome -d $dataset -s 12 -c 162 -r 500 -m 10"
+#job_name=${genome}_${dataset}_pALL_tINF
+#runPBS "$job_cmd" "$job_name"
+#
+#job_cmd="./makeTrainingDS.py -g $genome -d $dataset -s 12 -c 162 -r 500 -m 1"
+#job_name=${genome}_${dataset}_pALL_tINF_m1
+#runPBS "$job_cmd" "$job_name"
+
+#dataset=PBMCs
+#
+#job_cmd="./makeTrainingDS.py -g $genome -d $dataset -s 12 -c 162 -r 500"
+#job_name=${genome}_${dataset}_pALL_tINF_mINF
+#runPBS "$job_cmd" "$job_name"
+
+#job_cmd="./makeTrainingDS.py -g $genome -d $dataset -s 12 -c 162 -r 500 -m 10"
+#job_name=${genome}_${dataset}_pALL_tINF
+#runPBS "$job_cmd" "$job_name"
+#
+#job_cmd="./makeTrainingDS.py -g $genome -d $dataset -s 12 -c 162 -r 500 -m 1"
+#job_name=${genome}_${dataset}_pALL_tINF_m1
+#runPBS "$job_cmd" "$job_name"
+
+#genome=GRCm38.78
+#dataset=EL4
+#
+#job_cmd="./makeTrainingDS.py -g $genome -d $dataset -s 12 -c 162 -r 500"
+#job_name=${genome}_${dataset}_pALL_tINF_mINF
+#runPBS "$job_cmd" "$job_name"
+
+#job_cmd="./makeTrainingDS.py -g $genome -d $dataset -s 12 -c 162 -r 500 -m 10"
+#job_name=${genome}_${dataset}_pALL_tINF
+#runPBS "$job_cmd" "$job_name"
+#
+#job_cmd="./makeTrainingDS.py -g $genome -d $dataset -s 12 -c 162 -r 500 -m 1"
+#job_name=${genome}_${dataset}_pALL_tINF_m1
+#runPBS "$job_cmd" "$job_name"
+
+#dataset=CT26
+#
+#job_cmd="./makeTrainingDS.py -g $genome -d $dataset -s 12 -c 162 -r 500"
+#job_name=${genome}_${dataset}_pALL_tINF_mINF
+#runPBS "$job_cmd" "$job_name"
+
+#job_cmd="./makeTrainingDS.py -g $genome -d $dataset -s 12 -c 162 -r 500 -m 10"
+#job_name=${genome}_${dataset}_pALL_tINF
+#runPBS "$job_cmd" "$job_name"
+#
+#job_cmd="./makeTrainingDS.py -g $genome -d $dataset -s 12 -c 162 -r 500 -m 1"
+#job_name=${genome}_${dataset}_pALL_tINF_m1
+#runPBS "$job_cmd" "$job_name"
+
+#genome=GRCh38.98
+#dataset=BLCL
+#
 #job_cmd="./makeTrainingDS.py -g $genome -d $dataset -s 12 -c 162 -r 500 -m 10 -t 25 -p 9"
 #job_name=${genome}_${dataset}_p9_t25
 #runPBS "$job_cmd" "$job_name"
