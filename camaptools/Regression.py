@@ -442,7 +442,6 @@ class RegressionTrainer(object):
                 cv=10,
                 random_state=seed,
                 solver='lbfgs',
-                multi_class='auto',
                 class_weight='balanced',
                 max_iter=1000,
                 n_jobs=1
@@ -451,7 +450,6 @@ class RegressionTrainer(object):
             from sklearn.linear_model import LogisticRegression
             clf = LogisticRegression(
                 random_state=seed,
-                multi_class='auto',
                 class_weight='balanced'
             )
         elif classifier == 'svc':
