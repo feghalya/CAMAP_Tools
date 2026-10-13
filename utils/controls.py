@@ -15,8 +15,6 @@ from camaptools.Dataset import Dataset
 # Initialize #
 # ########## #
 
-os.makedirs('revisions', exist_ok=True)
-
 model_names, models = load_models(162, ['SGD', 'SGD_Shuffle'])
 model_names = model_names[162]
 models = models[162]
@@ -34,7 +32,7 @@ n, p = zip(*model.embeds.weight.tolist())
 df_embeds = pd.DataFrame({'Positive': p, 'Negative': n}, index=codons)
 df_embeds['AA'] = [codonTable[c] if c != '000' else '0' for c in df_embeds.index]
 print(df_embeds)
-df_embeds.to_csv('revisions/embeddings.7.tsv', sep='\t', float_format='%g')
+df_embeds.to_csv('output/revisions/embeddings.7.tsv', sep='\t', float_format='%g')
 
 # ########### #
 # Preferences #
@@ -47,7 +45,7 @@ pos_list = []
 anti_pref_list = []
 pref_list = []
 
-model = models['SGD_Shuffle']['e4000'][6]
+m = models['SGD_Shuffle']['e4000'][6]
 for codon in codons:
     for pos in range(npos):
         seq = ['000']*npos
@@ -55,7 +53,7 @@ for codon in codons:
         seq = ''.join(seq)
         seq = model._get_embeds(seq)
         seq = model._assert_type(seq)
-        n, s = model.get_score(seq).tolist()[0]
+        n, s = m.get_score(seq).tolist()[0]
         codon_list.append(codon)
         pos_list.append(pos)
         anti_pref_list.append(n)
@@ -65,51 +63,59 @@ predf = {'Position': pos_list, 'Preference': pref_list}
 df_prefs = pd.DataFrame(predf, index=codon_list)
 df_prefs['AA'] = [codonTable[c] if c != '000' else '0' for c in df_prefs.index]
 print(df_prefs)
-df_prefs.to_csv('revisions/preferences.7.tsv', sep='\t', float_format='%g')
-#df_prefs.to_csv('revisions/preferences.original.7.tsv', sep='\t', float_format='%g')
+df_prefs.to_csv('output/revisions/preferences.7.tsv', sep='\t', float_format='%g')
 
 # ############# #
 # Distributions #
 # ############# #
 
-with gzip.open('../../CAMAP/training_datasets/OneTrue_maxBs-1250_minHLANb-1_minLogFPKM-0.0003_padding-162_multiTrans-True_nonSourceFactor-5_addFields-_multiGenes-True_sequenceAlteration-removed_sourceSize-19658_encoding-CodonShuffleEmbeddings.pkl.gz', 'rb') as f:
+with gzip.open('../CAMAP/training_datasets/OneTrue_maxBs-1250_minHLANb-1_minLogFPKM-0.0003_padding-162_multiTrans-True_nonSourceFactor-5_addFields-_multiGenes-True_sequenceAlteration-removed_sourceSize-19658_encoding-CodonShuffleEmbeddings.pkl.gz', 'rb') as f:
     trainshuff = pkl.load(f)
 
-codon_source_dct = {codons[cod]: [0]*(162//3*2) for cod in range(65)}
-codon_nonsource_dct = {codons[cod]: [0]*(162//3*2) for cod in range(65)}
-for sns in trainshuff.values():
-    nonsource_seqs = sns[0]
-    for seq in nonsource_seqs:
-        for pos, cod in enumerate(seq):
-            codon_nonsource_dct[codons[cod]][pos] += 1
-    source_seqs = sns[1]
-    for seq in source_seqs:
-        for pos, cod in enumerate(seq):
-            codon_source_dct[codons[cod]][pos] += 1
+with gzip.open('../CAMAP/training_datasets/OneTrue_maxBs-1250_minHLANb-1_minLogFPKM-0.0003_padding-162_multiTrans-True_nonSourceFactor-5_addFields-_multiGenes-True_sequenceAlteration-removed_sourceSize-19658_encoding-CodonEmbeddings.pkl.gz', 'rb') as f:
+    train = pkl.load(f)
 
-aa_source_dct = {aa: [0]*(162//3*2) for aa in AATable.keys()}
-for aa, cod in AATable.items():
-    for pos in range(len(aa_source_dct[aa])):
-        aa_source_dct[aa][pos] = sum([codon_source_dct[c][pos] for c in cod])
-aa_nonsource_dct = {aa: [0]*(162//3*2) for aa in AATable.keys()}
-for aa, cod in AATable.items():
-    for pos in range(len(aa_nonsource_dct[aa])):
-        aa_nonsource_dct[aa][pos] = sum([codon_nonsource_dct[c][pos] for c in cod])
+def distributions(shuffle=True):
+    originals = '' if shuffle else '.noshuff'
+    trainds = trainshuff if shuffle else train
+    codon_source_dct = {codons[cod]: [0]*(162//3*2) for cod in range(65)}
+    codon_nonsource_dct = {codons[cod]: [0]*(162//3*2) for cod in range(65)}
+    for sns in trainds.values():
+        nonsource_seqs = sns[0]
+        for seq in nonsource_seqs:
+            for pos, cod in enumerate(seq):
+                codon_nonsource_dct[codons[cod]][pos] += 1
+        source_seqs = sns[1]
+        for seq in source_seqs:
+            for pos, cod in enumerate(seq):
+                codon_source_dct[codons[cod]][pos] += 1
 
-df_cod_counts = pd.DataFrame(codon_source_dct)
-df_cod_counts.index.name = 'Position'
-df_aa_counts = pd.DataFrame(aa_source_dct)
-df_aa_counts.index.name = 'Position'
-df_cod_counts.to_csv('revisions/distributions.source.codons.tsv', sep='\t', float_format='%g')
-df_aa_counts.to_csv('revisions/distributions.source.aa.tsv', sep='\t', float_format='%g')
-df_cod_counts = pd.DataFrame(codon_nonsource_dct)
-df_cod_counts.index.name = 'Position'
-df_aa_counts = pd.DataFrame(aa_nonsource_dct)
-df_aa_counts.index.name = 'Position'
-df_cod_counts.to_csv('revisions/distributions.nonsource.codons.tsv', sep='\t', float_format='%g')
-df_aa_counts.to_csv('revisions/distributions.nonsource.aa.tsv', sep='\t', float_format='%g')
-print(df_cod_counts)
-print(df_aa_counts)
+    aa_source_dct = {aa: [0]*(162//3*2) for aa in AATable.keys()}
+    for aa, cod in AATable.items():
+        for pos in range(len(aa_source_dct[aa])):
+            aa_source_dct[aa][pos] = sum([codon_source_dct[c][pos] for c in cod])
+    aa_nonsource_dct = {aa: [0]*(162//3*2) for aa in AATable.keys()}
+    for aa, cod in AATable.items():
+        for pos in range(len(aa_nonsource_dct[aa])):
+            aa_nonsource_dct[aa][pos] = sum([codon_nonsource_dct[c][pos] for c in cod])
+
+    df_cod_counts = pd.DataFrame(codon_source_dct)
+    df_cod_counts.index.name = 'Position'
+    df_aa_counts = pd.DataFrame(aa_source_dct)
+    df_aa_counts.index.name = 'Position'
+    df_cod_counts.to_csv('output/revisions/distributions%s.source.codons.tsv' % originals, sep='\t', float_format='%g')
+    df_aa_counts.to_csv('output/revisions/distributions%s.source.aa.tsv' % originals, sep='\t', float_format='%g')
+    df_cod_counts = pd.DataFrame(codon_nonsource_dct)
+    df_cod_counts.index.name = 'Position'
+    df_aa_counts = pd.DataFrame(aa_nonsource_dct)
+    df_aa_counts.index.name = 'Position'
+    df_cod_counts.to_csv('output/revisions/distributions%s.nonsource.codons.tsv' % originals, sep='\t', float_format='%g')
+    df_aa_counts.to_csv('output/revisions/distributions%s.nonsource.aa.tsv' % originals, sep='\t', float_format='%g')
+    print(df_cod_counts)
+    print(df_aa_counts)
+
+distributions(True)
+distributions(False)
 
 # ############### #
 # BS Correlations #
@@ -141,10 +147,10 @@ def allele(dat, al):
     df_scores = pd.DataFrame({'CAMAP': camap_scores, 'logBS': bs_scores, 'Class': classes}, index=peptides)
     df_scores['BS'] = 50000**(1-df_scores.logBS)
     print('saving df')
-    df_scores.to_csv('revisions/allele_%s_scores.tsv' % al, sep='\t', float_format='%g')
+    df_scores.to_csv('output/revisions/allele_%s_scores.tsv' % al, sep='\t', float_format='%g')
     print(df_scores)
     for s in ['Source', 'NonSource']:
-        outf = 'revisions/allele_%s_scores.%s.n2500.tsv' % (allele, s)
+        outf = 'output/revisions/allele_%s_scores.%s.n2500.tsv' % (al, s)
         df_scores[df_scores.Class == s].sample(2500).to_csv(outf, sep='\t', float_format='%g')
     dat.clear_unused()
     print('cleaned!')
@@ -166,29 +172,28 @@ camap_scores = []
 classes = []
 transcripts = []
 for pep in dat.peptides[1]:
-    for tr in dat.peptr[pep]:
+    for tr in dat.pepexpr[pep][1]:
         peptides.append(pep[0])
         camap_scores.append(dat.peptides[1][pep]['SGD'][6])
         classes.append('Source')
         transcripts.append(tr)
 for pep in dat.peptides[0]:
-    for tr in dat.peptr[pep]:
+    for tr in dat.pepexpr[pep][1]:
         peptides.append(pep[0])
         camap_scores.append(dat.peptides[0][pep]['SGD'][6])
         classes.append('NonSource')
         transcripts.append(tr)
 df_scores = pd.DataFrame({'CAMAP': camap_scores, 'Transcript': transcripts, 'Class': classes}, index=peptides)
-df_scores.to_csv('revisions/transcript_scores.tsv.gz', sep='\t', float_format='%g')
-expression_data = '../data/expression/analysis/Project_HumanBLCLPerreault/tpm/isoforms.tpm.tsv'
-df_tpm = pd.read_csv(expression_data, sep='\t', index_col=0)
+df_scores.to_csv('output/revisions/transcript_scores.tsv.gz', sep='\t', float_format='%g')
+df_tpm = pd.read_csv('data/expression/analysis/Project_HumanBLCLPerreault/tpm/isoforms.tpm.tsv', sep='\t', index_col=0)
 for sample in df_tpm.columns:
     df = df_scores.merge(df_tpm[[sample]], how='left', left_on='Transcript', right_index=True)
     df = df.rename({sample: 'TPM'}, axis=1)
     df = df[df['TPM'] > 0]
     df['log10TPM'] = np.log10(df['TPM'])
-    df.to_csv('revisions/patient_%s_scores.tsv' % sample, sep='\t', float_format='%g')
+    df.to_csv('output/revisions/patient_%s_scores.tsv' % sample, sep='\t', float_format='%g')
     for s in ['Source', 'NonSource']:
-        outf = 'revisions/patient_%s_scores.%s.n2500.tsv' % (sample, s)
+        outf = 'output/revisions/patient_%s_scores.%s.n2500.tsv' % (sample, s)
         df[df.Class == s].sample(2500).to_csv(outf, sep='\t', float_format='%g')
 dat.clear_unused()
 del peptides
