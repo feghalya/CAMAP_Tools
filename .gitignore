@@ -2,5 +2,6 @@ __pycache__/
 *.egg-info/
 output/
 log/
+reports/
 data/expression/analysis/
 data/peptides/ms/
