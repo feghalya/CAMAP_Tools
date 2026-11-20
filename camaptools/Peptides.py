@@ -4,6 +4,7 @@ import os
 import pickle as pkl
 import pandas as pd
 import shutil
+import sys
 import subprocess
 from collections import defaultdict
 import pkg_resources
@@ -50,7 +51,7 @@ class Peptides(object):
             info['pyTorchVersion'] = pkg_resources.get_distribution("torch").version
         if 'CAMAPModels' not in info:
             edited = True
-            info['modelANN'] = self.model_names
+            info['CAMAPModels'] = self.model_names
         if 'numberPeptideContexts' not in info:
             edited = True
             info['numberPeptideContexts'] = counts
@@ -102,7 +103,7 @@ class Peptides(object):
                         seq_scores[counter] = {}
                         seqs[counter] = seq
                         if self.overwrite:
-                            del entry['CAMAPScore']
+                            entry.pop('CAMAPScore', None)
                         for context in models:
                             for method in models[context]:
                                 for params in models[context][method]:
@@ -116,7 +117,8 @@ class Peptides(object):
                                         entry['CAMAPScore'][method][context][params] = []
                                         jobs.add((context, method, params))
                     if len(seqs) == chunk_size:
-                        run_models()  # will get jobs and seqs values from the outer scope
+                        if jobs:
+                            run_models()  # will get jobs and seqs values from the outer scope
                         jobs = set()
                         seqs = {}
                         gc.collect()

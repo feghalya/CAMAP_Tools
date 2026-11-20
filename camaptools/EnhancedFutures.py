@@ -134,7 +134,7 @@ def as_completed(futures):
     processes = [f for f in futures if f.kind == 'process']
 
     if processes:
-        proc_dct = {f.process: f for f in futures}
+        proc_dct = {f.process: f for f in processes}
         if ptype == EnhancedMPIPoolExecutor:
             from mpi4py.futures import as_completed
         else:

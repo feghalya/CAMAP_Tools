@@ -82,7 +82,7 @@ def main():
     dat.load_peptides_options(
         max_bs_or_rank=max_bs_or_rank,
         max_contexts=max_contexts,
-        peptide_lengths=int(peplen)
+        peptide_lengths=int(peplen) if peplen else [8, 9, 10, 11]
     )
     dat.load_peptides()
 

@@ -7,9 +7,8 @@ import pandas as pd
 import sys
 import os
 from concurrent.futures import ProcessPoolExecutor
-import os
 
-from camaptools.MLP import Model, load_models
+from camaptools.MLP import load_models
 from camaptools.utils import trainds_path
 
 
@@ -27,7 +26,7 @@ def calc_auc(seed, homology=10, copy='', embeddings='original', dataset='BLCL', 
         suffix_hom = 'mINF'
         ncont = 0
     else:
-        sys.write.stderr('Homology value not recognized\n')
+        sys.stderr.write('Homology value not recognized\n')
         sys.exit(1)
 
     if copy == 'TPM':
@@ -53,7 +52,7 @@ def calc_auc(seed, homology=10, copy='', embeddings='original', dataset='BLCL', 
         algorithm = 'SGD_AminoAcid'
         embeddings = 'AminoAcidEmbeddings'
     else:
-        sys.write.stderr('Embeddings value not recognized\n')
+        sys.stderr.write('Embeddings value not recognized\n')
         sys.exit(1)
 
     m = MODELS[1][162][algorithm]['e4000pep9t5%s%s' % (suffix_hom, suffix_bin)][seed]
@@ -97,7 +96,7 @@ def calc_auc(seed, homology=10, copy='', embeddings='original', dataset='BLCL', 
         test_size = len(s) + len(ns)
         train_size = -1
         validation_size = -1
-        
+
     fpr, tpr, thresholds = metrics.roc_curve(labels, scores)
     auc = metrics.auc(fpr, tpr)
 
@@ -165,7 +164,7 @@ def run(dat):
         "TrainSize": train_sizes,
         "ValidationSize": validation_sizes
         }).set_index('Label')
-    df_shuffling['Dataset'] = dataset
+    df_shuffling['Dataset'] = dat
 
     # ** Homology **
 
@@ -245,36 +244,37 @@ def run(dat):
     return df_homology, df_binning, df_shuffling, df_bias
 
 
-homologies = []
-binnings = []
-shufflings = []
-bias = []
-for dataset in ['BLCL', 'B721', 'PBMCs', 'EL4', 'CT26']:
-    print('Running', dataset)
-    df1, df2, df3, df4 = run(dataset)
-    homologies.append(df1)
-    binnings.append(df2)
-    shufflings.append(df3)
-    bias.append(df4)
+if __name__ == '__main__':
+    homologies = []
+    binnings = []
+    shufflings = []
+    bias = []
+    for dataset in ['BLCL', 'B721', 'PBMCs', 'EL4', 'CT26']:
+        print('Running', dataset)
+        df1, df2, df3, df4 = run(dataset)
+        homologies.append(df1)
+        binnings.append(df2)
+        shufflings.append(df3)
+        bias.append(df4)
 
-homologies = pd.concat(homologies, axis=0)
-binnings = pd.concat(binnings, axis=0)
-shufflings = pd.concat(shufflings, axis=0)
-bias = pd.concat(bias, axis=0)
+    homologies = pd.concat(homologies, axis=0)
+    binnings = pd.concat(binnings, axis=0)
+    shufflings = pd.concat(shufflings, axis=0)
+    bias = pd.concat(bias, axis=0)
 
-os.makedirs('revisions', exist_ok=True)
+    os.makedirs('revisions', exist_ok=True)
 
-homologies[homologies.Dataset == 'BLCL'].to_csv('revisions/homology.tsv', sep='\t', float_format='%g')
-binnings[binnings.Dataset == 'BLCL'].to_csv('revisions/binning.tsv', sep='\t', float_format='%g')
-shufflings[shufflings.Dataset == 'BLCL'].to_csv('revisions/shuffling.tsv', sep='\t', float_format='%g')
-bias[bias.Dataset == 'BLCL'].to_csv('revisions/bias.tsv', sep='\t', float_format='%g')
-#^ only compare original vs shuffle
+    homologies[homologies.Dataset == 'BLCL'].to_csv('revisions/homology.tsv', sep='\t', float_format='%g')
+    binnings[binnings.Dataset == 'BLCL'].to_csv('revisions/binning.tsv', sep='\t', float_format='%g')
+    shufflings[shufflings.Dataset == 'BLCL'].to_csv('revisions/shuffling.tsv', sep='\t', float_format='%g')
+    bias[bias.Dataset == 'BLCL'].to_csv('revisions/bias.tsv', sep='\t', float_format='%g')
+    #^ only compare original vs shuffle
 
-homologies[homologies.Dataset != 'BLCL'].to_csv('revisions/homology.valid.tsv', sep='\t', float_format='%g')
-binnings[binnings.Dataset != 'BLCL'].to_csv('revisions/binning.valid.tsv', sep='\t', float_format='%g')
-shufflings[shufflings.Dataset != 'BLCL'].to_csv('revisions/shuffling.valid.tsv', sep='\t', float_format='%g')
-bias[bias.Dataset != 'BLCL'].to_csv('revisions/bias.valid.tsv', sep='\t', float_format='%g')
-#^ can compare strategies (ex: C10 vs CINF)
+    homologies[homologies.Dataset != 'BLCL'].to_csv('revisions/homology.valid.tsv', sep='\t', float_format='%g')
+    binnings[binnings.Dataset != 'BLCL'].to_csv('revisions/binning.valid.tsv', sep='\t', float_format='%g')
+    shufflings[shufflings.Dataset != 'BLCL'].to_csv('revisions/shuffling.valid.tsv', sep='\t', float_format='%g')
+    bias[bias.Dataset != 'BLCL'].to_csv('revisions/bias.valid.tsv', sep='\t', float_format='%g')
+    #^ can compare strategies (ex: C10 vs CINF)
 
 
 # NOTES

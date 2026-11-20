@@ -65,7 +65,7 @@ class CodonShuffleEmbeddings(CodonEmbeddings):
     def encode(self, seq, seed=None):
         assert len(seq)%3 == 0
         if seed is None:
-            seed = random.randint(0, 1e9)
+            seed = random.randint(0, int(1e9))
         X = []
         for c in range(0, len(seq), 3):
             seed += 1  # WARNING: Setting seeds this way is not a good idea

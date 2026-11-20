@@ -10,6 +10,7 @@ import random
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
 import gc
+import gzip
 import sys
 
 from camaptools.GenomeData import AATable, synonymousCodonsFrequencies
@@ -137,7 +138,7 @@ class Dataset(object):
         pepfiles = []
         for f in self.pepfiles:
             for peplen in peplens:
-                if int(os.path.basename(f).split('_')[1][1:].replace('.pkl', '')) == peplen:
+                if int(os.path.basename(f).split('_')[1].split('.')[0][1:]) == peplen:
                     pepfiles.append(f)
                     break
         self.pepfiles = pepfiles
@@ -180,7 +181,7 @@ class Dataset(object):
     def _load_peptides(self, pfile):
         print(pfile)
 
-        pdct = pkl.load(open(pfile, 'rb'))
+        pdct = pkl.load(gzip.open(pfile, 'rb'))
         peptides = [{}, {}]
         tr_is_source = {k: False for k in self.tpm_dct.keys()}
         #^ True == source peptide in transcript, else False
@@ -284,7 +285,7 @@ class TrainingDataset(Dataset):
         assert sum([same_tpm, same_bs, same_gc]) < 2
 
         if seed is None:
-            seed = random.randint(0, 1e9)
+            seed = random.randint(0, int(1e9))
 
         do_binning = same_tpm or same_bs or same_gc if ratio is not None else False
         #debug = False
@@ -713,9 +714,9 @@ class RegressionDataset(Dataset):
             nswitch = int((len(ix_test) - len(ix_train)*split_ratio) / (1 + split_ratio))
 
         # NOTE: This method does not preserve class proportions
-        random.seed = seed
+        random.seed(seed)
         ix_remove = random.sample(range(len(ix_train)), nremove)
-        random.seed = seed
+        random.seed(seed)
         ix_switch = random.sample(range(len(ix_test)), nswitch)
 
         print('Remove:', nremove)
