@@ -398,6 +398,7 @@ class RegressionTrainer(object):
         results = {
             'Accuracy': np.nan,
             'PPV': np.nan,
+            'NPV': np.nan,
             'Sensitivity': np.nan,
             'Specificity': np.nan,
             'AUC' : np.nan,
@@ -552,16 +553,16 @@ class RegressionTrainer(object):
             labels=None, pos_label=1, average='binary'
         )
         npv = metrics.precision_score(
-            labels, 1 - predictions, sample_weight=weights,
-            labels=None, pos_label=1, average='binary'
+            labels, predictions, sample_weight=weights,
+            labels=None, pos_label=0, average='binary'
         )
         sensitivity = metrics.recall_score(
-            1 - labels, predictions, sample_weight=weights,
+            labels, predictions, sample_weight=weights,
             labels=None, pos_label=1, average='binary'
         )
         specificity = metrics.recall_score(
-            1 - labels, 1 - predictions, sample_weight=weights,
-            labels=None, pos_label=1, average='binary'
+            labels, predictions, sample_weight=weights,
+            labels=None, pos_label=0, average='binary'
         )
         mcc = metrics.matthews_corrcoef(labels, predictions, sample_weight=weights)
         fpr, tpr, thresholds = metrics.roc_curve(labels, scores)
