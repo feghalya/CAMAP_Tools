@@ -10,6 +10,7 @@ from lime.lime_text import LimeTextExplainer
 from tqdm import trange
 from concurrent.futures import ProcessPoolExecutor
 from camaptools.EnhancedFutures import EnhancedProcessPoolExecutor, EnhancedMPIPoolExecutor
+from camaptools.utils import trainds_path
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -240,7 +241,7 @@ def count_differences(lime_seq_dict, pref_seq_dict):
 
 def load_data(replicate):
     ds = 'BLCL_GRCh37.75_padding162_maxBS500_maxContexts10_ratio5_peplen9'
-    with gzip.open('output/trainDS/%s_seed%d-Metadata.pkl.gz' % (ds, replicate), 'rb') as f:
+    with gzip.open(trainds_path('%s_seed%d-Metadata.pkl.gz' % (ds, replicate)), 'rb') as f:
         meta = pickle.load(f)
 
     test_seqs = {}

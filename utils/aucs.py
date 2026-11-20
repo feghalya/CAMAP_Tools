@@ -10,6 +10,7 @@ from concurrent.futures import ProcessPoolExecutor
 import os
 
 from camaptools.MLP import Model, load_models
+from camaptools.utils import trainds_path
 
 
 MODELS = load_models(algorithms=['SGD', 'SGD_Shuffle', 'SGD_AminoAcid', 'SGD_nobias', 'SGD_nobias_Shuffle'])
@@ -63,7 +64,7 @@ def calc_auc(seed, homology=10, copy='', embeddings='original', dataset='BLCL', 
             copy_dist, '_seed', seed+1, embeddings
         )
 
-        p = pkl.load(gzip.open('../output/trainDS/%s' % dsname, 'rb'))
+        p = pkl.load(gzip.open(trainds_path(dsname), 'rb'))
 
         ns = p['test'][0]
         s = p['test'][1]
@@ -85,7 +86,7 @@ def calc_auc(seed, homology=10, copy='', embeddings='original', dataset='BLCL', 
             dataset, species, '_seed', seed+1, embeddings
         )
 
-        p = pkl.load(gzip.open('../output/trainDS/%s' % dsname, 'rb'))
+        p = pkl.load(gzip.open(trainds_path(dsname), 'rb'))
 
         ns = p['train'][0] + p['validation'][0] + p['test'][0]
         s = p['train'][1] + p['validation'][1] + p['test'][1]

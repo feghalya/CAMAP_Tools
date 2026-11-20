@@ -12,6 +12,16 @@ ROOT = '/'.join(os.path.realpath(__file__).split('/')[:-2])
 OUTPUT_FOLDER = os.path.join(ROOT, "output")
 
 
+def trainds_path(filename):
+    """Path of a file in output/trainDS, where datasets are grouped by cell line.
+
+    The cell line is the first '_'-separated field of the name, e.g.
+    BLCL_GRCh37.75_..._seed1-Metadata.pkl.gz -> output/trainDS/BLCL/<filename>.
+    The cell-line folder is not created.
+    """
+    return os.path.join(OUTPUT_FOLDER, 'trainDS', filename.split('_')[0], filename)
+
+
 def available_models(target='validation-bestMin-score.pytorch', context=162, algorithms=None, parameters=None):
     out_dir = OUTPUT_FOLDER
     model_listing = defaultdict(lambda: defaultdict(dict))

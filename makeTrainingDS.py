@@ -7,29 +7,29 @@ import gzip
 
 from camaptools.Dataset import TrainingDataset
 from camaptools.EnhancedFutures import EnhancedProcessPoolExecutor, EnhancedMPIPoolExecutor
+from camaptools.utils import trainds_path
 
 
 def write_to_disk(dat, ds_name, save_meta):
-    if not os.path.exists('output/trainDS'):
-        os.makedirs('output/trainDS')
+    os.makedirs(os.path.dirname(trainds_path(ds_name)), exist_ok=True)
 
     if hasattr(dat, 'enc_dct'):
-        out_name = 'output/trainDS/%s_encoding-CodonEmbeddings.pkl.gz' % ds_name
+        out_name = trainds_path('%s_encoding-CodonEmbeddings.pkl.gz' % ds_name)
         with gzip.open(out_name, 'wb') as f:
             pkl.dump(dat.enc_dct, f)
 
     if hasattr(dat, 'shuff_enc_dct'):
-        out_name = 'output/trainDS/%s_encoding-CodonShuffleEmbeddings.pkl.gz' % ds_name
+        out_name = trainds_path('%s_encoding-CodonShuffleEmbeddings.pkl.gz' % ds_name)
         with gzip.open(out_name, 'wb') as f:
             pkl.dump(dat.shuff_enc_dct, f)
 
     if hasattr(dat, 'aa_enc_dct'):
-        out_name = 'output/trainDS/%s_encoding-AminoAcidEmbeddings.pkl.gz' % ds_name
+        out_name = trainds_path('%s_encoding-AminoAcidEmbeddings.pkl.gz' % ds_name)
         with gzip.open(out_name, 'wb') as f:
             pkl.dump(dat.aa_enc_dct, f)
 
     if save_meta:
-        out_name = 'output/trainDS/%s-Metadata.pkl.gz' % ds_name
+        out_name = trainds_path('%s-Metadata.pkl.gz' % ds_name)
         with gzip.open(out_name, 'wb') as f:
             pkl.dump(dat.meta_dct, f)
 

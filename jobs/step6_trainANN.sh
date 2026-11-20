@@ -19,7 +19,7 @@ function runPBS {
 source /home/feghalya/.virtualenvs/ml/bin/activate
 for s in {$exp..$((exp+2))}
 do
-    infile=output/trainDS/${dsname}_seed\$s
+    infile=output/trainDS/${dsname%%_*}/${dsname}_seed\$s
     echo '$run' -ds \$infile
     $run -ds \$infile 2>&1 > $outdir/$name-\$s-$date.log | tr '\r' '\n' > $outdir/$name-\$s-$date.err &
     sleep 5
